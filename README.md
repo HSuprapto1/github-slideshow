@@ -1,5 +1,11 @@
 # Your GitHub Learning Lab Repository for Introducing GitHub
 
+## Phone Tracker (Android)
+
+An Android app that stores country code + mobile number and tracks **this phone’s** live GPS on a map lives in [`phone-tracker/`](phone-tracker/). See [`phone-tracker/README.md`](phone-tracker/README.md) for build and install steps.
+
+---
+
 Welcome to **your** repository for your GitHub Learning Lab course. This repository will be used during the different activities that I will be guiding you through. See a word you don't understand? We've included an emoji 📖 next to some key terms. Click on it to see its definition.
 
 Oh! I haven't introduced myself...
