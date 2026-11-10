@@ -62,3 +62,4 @@ app/schemas/
 # Temporary files
 *.tmp
 *.temp
+*.apk
