@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
@@ -55,7 +56,8 @@ fun SettingsScreen(
     onNavigateToImport: () -> Unit = {},
     onNavigateToGpsTracking: () -> Unit = {},
     onNavigateToHomeCountry: () -> Unit = {},
-    onNavigateToImportFlights: () -> Unit = {}
+    onNavigateToImportFlights: () -> Unit = {},
+    onNavigateToFlightReminders: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -129,6 +131,13 @@ fun SettingsScreen(
                         title = "Import Flights",
                         subtitle = "Import from Gmail or add flights manually",
                         onClick = onNavigateToImportFlights
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
+                        icon = Icons.Default.NotificationsActive,
+                        title = "Flight Reminders",
+                        subtitle = "Smart reminders based on location & traffic",
+                        onClick = onNavigateToFlightReminders
                     )
                 }
             }

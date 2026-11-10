@@ -74,6 +74,11 @@ sealed class Screen(
         route = "flight_history",
         title = "Flight History"
     )
+    
+    data object FlightReminders : Screen(
+        route = "flight_reminders",
+        title = "Flight Reminders"
+    )
 }
 
 val bottomNavItems = listOf(

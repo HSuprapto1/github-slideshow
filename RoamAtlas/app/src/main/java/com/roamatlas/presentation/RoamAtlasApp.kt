@@ -27,6 +27,7 @@ import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
 import com.roamatlas.presentation.screens.flights.AddFlightScreen
+import com.roamatlas.presentation.screens.flights.FlightRemindersScreen
 import com.roamatlas.presentation.screens.flights.ImportFlightsScreen
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
@@ -132,6 +133,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToImportFlights = {
                             navController.navigate(Screen.ImportFlights.route)
+                        },
+                        onNavigateToFlightReminders = {
+                            navController.navigate(Screen.FlightReminders.route)
                         }
                     )
                 }
@@ -173,6 +177,13 @@ fun RoamAtlasApp(
                         },
                         onFlightAdded = {
                             // Flight was added successfully
+                        }
+                    )
+                }
+                composable(Screen.FlightReminders.route) {
+                    FlightRemindersScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
                         }
                     )
                 }

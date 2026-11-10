@@ -56,6 +56,13 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- Flight Reminder Service -->
+        <service
+            android:name=".data.flight.FlightReminderService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
     </application>
 
 </manifest>
