@@ -52,6 +52,31 @@ class GoogleTimelineParser @Inject constructor() {
     
     fun parseContent(content: String, fileName: String): ParseResult {
         return try {
+            val onDevice = OnDeviceTimelineParser.parse(content)
+            if (onDevice.kind == OnDeviceTimelineParser.Kind.ENCRYPTED) {
+                return ParseResult.Error(onDevice.message)
+            }
+            if (onDevice.kind == OnDeviceTimelineParser.Kind.ON_DEVICE) {
+                val locations = onDevice.points.map { point ->
+                    LocationRecord(
+                        latitude = point.latitude,
+                        longitude = point.longitude,
+                        timestamp = Instant.ofEpochMilli(point.timestampMillis),
+                        source = LocationSource.GOOGLE_TIMELINE,
+                        accuracy = point.accuracy,
+                        altitude = point.altitude,
+                        speed = point.speed,
+                        confidence = if (point.confidence == "VERIFIED") {
+                            DataConfidence.VERIFIED
+                        } else {
+                            DataConfidence.UNCERTAIN
+                        },
+                        originalSourceId = point.originalSourceId,
+                        notes = point.notes
+                    )
+                }
+                return ParseResult.Success(locations, onDevice.skipped, emptyList())
+            }
             when {
                 content.contains("\"locations\"") && content.contains("\"latitudeE7\"") -> {
                     parseRecordsJson(content)

@@ -62,7 +62,11 @@ class LocalTimelineImporter @Inject constructor(
                 locationsImported = locationsImported,
                 placesFound = placesFound,
                 errors = errors,
-                message = if (locationsImported > 0) "Imported $locationsImported locations" else "No data found"
+                message = if (locationsImported > 0) {
+                    "Saved $locationsImported places from the phone Timeline."
+                } else {
+                    "No places were found. Export Timeline data from phone Settings, then choose that file."
+                }
             )
         } catch (e: Exception) {
             ImportResult(false, 0, 0, listOf(e.message ?: "Unknown error"), "Failed: ${e.message}")
@@ -77,18 +81,14 @@ class LocalTimelineImporter @Inject constructor(
             val content = inputStream.bufferedReader().use { it.readText() }
             inputStream.close()
             
-            val (locations, places) = parseJsonContent(content)
-            
-            for (location in locations) {
-                locationDao.insert(location)
-            }
+            val saved = saveParsedContent(content)
             
             ImportResult(
-                success = locations.isNotEmpty(),
-                locationsImported = locations.size,
-                placesFound = places,
+                success = saved.inserted > 0,
+                locationsImported = saved.inserted,
+                placesFound = saved.places,
                 errors = emptyList(),
-                message = "Imported ${locations.size} locations"
+                message = saved.message
             )
         } catch (e: Exception) {
             ImportResult(false, 0, 0, listOf(e.message ?: "Unknown"), "Failed: ${e.message}")
@@ -111,16 +111,75 @@ class LocalTimelineImporter @Inject constructor(
         val content = inputStream.bufferedReader().use { it.readText() }
         inputStream.close()
         
-        val (locations, places) = parseJsonContent(content)
-        
-        for (location in locations) {
-            locationDao.insert(location)
+        val saved = saveParsedContent(content)
+        return Pair(saved.inserted, saved.places)
+    }
+
+    private data class Saved(
+        val inserted: Int,
+        val places: Int,
+        val message: String
+    )
+
+    private suspend fun saveParsedContent(content: String): Saved {
+        val onDevice = OnDeviceTimelineParser.parse(content)
+        if (onDevice.kind == OnDeviceTimelineParser.Kind.ENCRYPTED ||
+            onDevice.kind == OnDeviceTimelineParser.Kind.EMPTY
+        ) {
+            return Saved(0, 0, onDevice.message)
         }
-        
-        return Pair(locations.size, places)
+        if (onDevice.kind == OnDeviceTimelineParser.Kind.ON_DEVICE) {
+            val inserted = insertEntities(onDevice.points.map { it.toEntity() })
+            val message = when {
+                inserted > 0 -> "${onDevice.message} Saved $inserted new places."
+                onDevice.points.isEmpty() -> onDevice.message
+                else -> "Those places are already saved in RoamAtlas."
+            }
+            return Saved(inserted, onDevice.places, message)
+        }
+
+        val (locations, places) = parseLegacyContent(content)
+        val inserted = insertEntities(locations)
+        val message = when {
+            inserted > 0 -> "Saved $inserted places from the older Google file."
+            locations.isEmpty() -> "No places were found in that file. Use the Timeline file from phone Settings, not the locked Takeout download."
+            else -> "Those places are already saved in RoamAtlas."
+        }
+        return Saved(inserted, places, message)
+    }
+
+    private suspend fun insertEntities(locations: List<LocationEntity>): Int {
+        if (locations.isEmpty()) return 0
+        var inserted = 0
+        for (chunk in locations.chunked(400)) {
+            inserted += locationDao.insertAll(chunk).count { it != -1L }
+        }
+        return inserted
+    }
+
+    private fun OnDeviceTimelineParser.Point.toEntity(): LocationEntity {
+        val now = System.currentTimeMillis()
+        return LocationEntity(
+            id = 0,
+            latitude = latitude,
+            longitude = longitude,
+            timestampMillis = timestampMillis,
+            source = "GOOGLE_TIMELINE",
+            accuracy = accuracy,
+            altitude = altitude,
+            speed = speed,
+            countryCode = null,
+            countryName = null,
+            city = city,
+            confidence = confidence,
+            originalSourceId = originalSourceId,
+            notes = notes,
+            createdAtMillis = now,
+            updatedAtMillis = now
+        )
     }
     
-    private fun parseJsonContent(content: String): Pair<List<LocationEntity>, Int> {
+    private fun parseLegacyContent(content: String): Pair<List<LocationEntity>, Int> {
         val locations = mutableListOf<LocationEntity>()
         var placesCount = 0
         val now = System.currentTimeMillis()
@@ -185,7 +244,7 @@ class LocalTimelineImporter @Inject constructor(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
             countryCode = null, countryName = null, city = loc.optString("name", null),
-            confidence = "HIGH", originalSourceId = "pv_$ts",
+            confidence = "VERIFIED", originalSourceId = "pv_$ts",
             notes = loc.optString("address", null), createdAtMillis = now, updatedAtMillis = now
         )
     }
@@ -203,7 +262,7 @@ class LocalTimelineImporter @Inject constructor(
                     id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
                     source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
                     countryCode = null, countryName = null, city = null,
-                    confidence = "MEDIUM", originalSourceId = "seg_$ts",
+                    confidence = "UNCERTAIN", originalSourceId = "seg_$ts",
                     notes = null, createdAtMillis = now, updatedAtMillis = now
                 ))
             }
@@ -228,7 +287,7 @@ class LocalTimelineImporter @Inject constructor(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = acc, altitude = loc.optDouble("altitude", Double.NaN).takeIf { !it.isNaN() },
             speed = null, countryCode = null, countryName = null, city = null,
-            confidence = if (acc != null && acc < 50) "HIGH" else "MEDIUM",
+            confidence = if (acc != null && acc < 50) "VERIFIED" else "UNCERTAIN",
             originalSourceId = "rec_$ts", notes = null, createdAtMillis = now, updatedAtMillis = now
         )
     }
@@ -250,7 +309,7 @@ class LocalTimelineImporter @Inject constructor(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
             countryCode = null, countryName = null, city = obj.optString("name", null),
-            confidence = "MEDIUM", originalSourceId = "gen_$ts",
+            confidence = "UNCERTAIN", originalSourceId = "gen_$ts",
             notes = obj.optString("address", null), createdAtMillis = now, updatedAtMillis = now
         )
     }

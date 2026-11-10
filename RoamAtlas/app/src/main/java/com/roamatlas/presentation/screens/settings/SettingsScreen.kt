@@ -86,8 +86,8 @@ fun SettingsScreen(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.PhoneAndroid,
-                        title = "Import from Phone",
-                        subtitle = "Read Google Maps Timeline directly from device",
+                        title = "Unlock phone Timeline",
+                        subtitle = "Get the readable file from phone Settings",
                         onClick = onNavigateToLocalTimelineImport
                     )
                     HorizontalDivider()

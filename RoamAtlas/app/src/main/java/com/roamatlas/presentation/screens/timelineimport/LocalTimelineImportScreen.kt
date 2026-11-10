@@ -1,25 +1,53 @@
 package com.roamatlas.presentation.screens.timelineimport
 
+import android.content.ComponentName
 import android.content.Intent
-import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -31,24 +59,18 @@ fun LocalTimelineImportScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    var currentStep by remember { mutableIntStateOf(1) }
-    
-    val folderLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let { viewModel.importFromFolder(it) }
-    }
-    
+    var openedSettings by rememberSaveable { mutableStateOf(false) }
+
     val fileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { viewModel.importFromFile(it) }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Import Your Timeline") },
+                title = { Text("Your past Timeline") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -65,369 +87,155 @@ fun LocalTimelineImportScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header
             Card(
-                modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        Icons.Default.History,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Your history is on this phone",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Import Your Past Locations",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Follow these simple steps to get your Google location history into RoamAtlas",
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        "Google locked the website download. The readable copy is already on this phone. " +
+                            "The button that unlocks it is in the phone Settings app, not in Google Maps and not on the Google website.",
+                        style = MaterialTheme.typography.bodyLarge
                     )
                 }
             }
-            
-            // Processing state
+
             if (uiState.isProcessing) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                ) {
+                Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Reading your Timeline…")
                         Text(
-                            "Reading your timeline data...",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            "This may take a moment",
+                            "A long history can take a minute.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
                     }
                 }
             }
-            
-            // Result state
+
             uiState.result?.let { result ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (result.success) 
-                            MaterialTheme.colorScheme.primaryContainer 
-                        else 
+                        containerColor = if (result.success) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
                             MaterialTheme.colorScheme.errorContainer
+                        }
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 if (result.success) Icons.Default.CheckCircle else Icons.Default.Error,
-                                contentDescription = null,
-                                tint = if (result.success) 
-                                    MaterialTheme.colorScheme.primary 
-                                else 
-                                    MaterialTheme.colorScheme.error
+                                contentDescription = null
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    if (result.success) "Import Successful!" else "Import Failed",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (result.success) {
-                                    Text(
-                                        "${result.locationsImported} locations imported",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    if (result.placesFound > 0) {
-                                        Text(
-                                            "${result.placesFound} places found",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        result.message,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            if (result.success) {
-                                Button(onClick = onNavigateBack) {
-                                    Text("View Dashboard")
-                                }
-                            }
-                            TextButton(onClick = { viewModel.clearResult() }) {
-                                Text("Import More")
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Step-by-step guide (only show when not processing and no result)
-            if (!uiState.isProcessing && uiState.result == null) {
-                // STEP 1
-                StepCard(
-                    stepNumber = 1,
-                    title = "Open Google Takeout",
-                    isExpanded = currentStep == 1,
-                    onToggle = { currentStep = if (currentStep == 1) 0 else 1 }
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            "Google Takeout is a free service that lets you download your data from Google.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        
-                        Button(
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://takeout.google.com"))
-                                context.startActivity(intent)
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Google Takeout")
-                        }
-                        
-                        Text(
-                            "This will open in your browser. Sign in with your Google account if asked.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                    }
-                }
-                
-                // STEP 2
-                StepCard(
-                    stepNumber = 2,
-                    title = "Select Location History",
-                    isExpanded = currentStep == 2,
-                    onToggle = { currentStep = if (currentStep == 2) 0 else 2 }
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        InstructionItem("1. Click \"Deselect all\" at the top")
-                        InstructionItem("2. Scroll down to find \"Location History (Timeline)\"")
-                        InstructionItem("3. Check the box next to it")
-                        InstructionItem("4. Click \"All Location History data included\" to expand")
-                        InstructionItem("5. Make sure \"JSON format\" is selected (not KML)")
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Lightbulb,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.tertiary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "JSON format is important! It contains all your location details.",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                // STEP 3
-                StepCard(
-                    stepNumber = 3,
-                    title = "Download Your Data",
-                    isExpanded = currentStep == 3,
-                    onToggle = { currentStep = if (currentStep == 3) 0 else 3 }
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        InstructionItem("1. Scroll to the bottom and click \"Next step\"")
-                        InstructionItem("2. Choose \"Send download link via email\"")
-                        InstructionItem("3. Select \".zip\" as the file type")
-                        InstructionItem("4. Click \"Create export\"")
-                        InstructionItem("5. Wait for the email (usually takes a few minutes)")
-                        InstructionItem("6. Open the email and download the ZIP file")
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Timer,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "The export might take 5-30 minutes depending on how much data you have.",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                // STEP 4
-                StepCard(
-                    stepNumber = 4,
-                    title = "Extract the ZIP File",
-                    isExpanded = currentStep == 4,
-                    onToggle = { currentStep = if (currentStep == 4) 0 else 4 }
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "After downloading, you need to extract (unzip) the file:",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        
-                        InstructionItem("1. Open your Downloads folder")
-                        InstructionItem("2. Find the file named \"takeout-XXXXXXXX.zip\"")
-                        InstructionItem("3. Long press the ZIP file")
-                        InstructionItem("4. Select \"Extract\" or \"Extract here\"")
-                        InstructionItem("5. A new folder will be created with your data")
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Text(
-                            "Your location data will be in:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
                             Text(
-                                "Takeout → Location History (Timeline) → Semantic Location History",
-                                modifier = Modifier.padding(12.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-                
-                // STEP 5 - IMPORT
-                StepCard(
-                    stepNumber = 5,
-                    title = "Import into RoamAtlas",
-                    isExpanded = currentStep == 5,
-                    onToggle = { currentStep = if (currentStep == 5) 0 else 5 },
-                    highlight = true
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            "Now you can import your location history!",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        
-                        Button(
-                            onClick = { folderLauncher.launch(null) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Folder, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Select the Extracted Folder")
-                        }
-                        
-                        Text(
-                            "Navigate to: Downloads → Takeout → Location History",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        Text(
-                            "Or import a single file:",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        
-                        OutlinedButton(
-                            onClick = { fileLauncher.launch(arrayOf("application/json")) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Description, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Select a JSON File")
-                        }
-                    }
-                }
-                
-                // Help card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Help,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Need Help?",
-                                style = MaterialTheme.typography.titleSmall,
+                                if (result.success) "Saved" else "Not saved",
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
+                        Text(result.message)
+                        if (result.success) {
+                            Text("${result.locationsImported} new places")
+                            if (result.placesFound > 0) {
+                                Text("${result.placesFound} visits")
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            if (result.success) {
+                                Button(onClick = onNavigateBack) { Text("See them") }
+                            }
+                            TextButton(onClick = { viewModel.clearResult() }) { Text("Try again") }
+                        }
+                    }
+                }
+            }
+
+            if (!uiState.isProcessing && uiState.result == null) {
+                StepBlock(number = "1", title = "Open phone Settings") {
+                    Text("Tap the button. It opens the Location page of your phone Settings.")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            openLocationSettings(context)
+                            openedSettings = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Open Location settings")
+                    }
+                }
+
+                StepBlock(number = "2", title = "Export Timeline data") {
+                    Text("On that screen, tap these words in order:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Bullet("Location services")
+                    Bullet("Timeline")
+                    Bullet("Export Timeline data")
+                    Bullet("Continue")
+                    Bullet("Save it in Downloads")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Wait until the phone says Export complete. The file is usually named Timeline.json.",
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Cannot find those words? At the top of Settings, tap the magnifying glass and type Timeline.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+                }
+
+                StepBlock(number = "3", title = "Bring the file back here") {
+                    Text("Come back to RoamAtlas and choose the file you just saved.")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            fileLauncher.launch(
+                                arrayOf("application/json", "text/plain", "application/octet-stream")
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (openedSettings) "Choose Timeline.json" else "Choose the Timeline file")
+                    }
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            "• This imports ALL your past locations from Google Maps\n" +
-                            "• It may include years of travel history\n" +
-                            "• Your data stays on your phone - nothing is uploaded\n" +
-                            "• You can import multiple times without duplicates",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            "Do not use the Google website",
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "The file from takeout.google.com stays locked. RoamAtlas cannot open that one. " +
+                                "Only Export Timeline data, inside phone Settings, creates a file this app can read."
                         )
                     }
                 }
@@ -437,84 +245,62 @@ fun LocalTimelineImportScreen(
 }
 
 @Composable
-private fun StepCard(
-    stepNumber: Int,
+private fun StepBlock(
+    number: String,
     title: String,
-    isExpanded: Boolean,
-    onToggle: () -> Unit,
-    highlight: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (highlight && isExpanded) 
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            else 
-                MaterialTheme.colorScheme.surface
-        ),
-        onClick = onToggle
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
-                        .background(
-                            if (highlight) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.primaryContainer,
-                            CircleShape
-                        ),
+                        .size(36.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "$stepNumber",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (highlight) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onPrimaryContainer
+                        number,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (isExpanded) "Collapse" else "Expand"
-                )
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
-            
-            if (isExpanded) {
-                Spacer(modifier = Modifier.height(12.dp))
-                content()
-            }
+            Spacer(modifier = Modifier.height(12.dp))
+            content()
         }
     }
 }
 
 @Composable
-private fun InstructionItem(text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top
-    ) {
-        Icon(
-            Icons.Default.ChevronRight,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium
-        )
+private fun Bullet(text: String) {
+    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+        Text("•  ", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+private fun openLocationSettings(context: android.content.Context) {
+    val candidates = listOf(
+        Intent().setComponent(
+            ComponentName(
+                "com.google.android.gms",
+                "com.google.android.gms.location.settings.LocationHistorySettingsActivity"
+            )
+        ),
+        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS)
+    )
+    for (intent in candidates) {
+        val canOpen = intent.resolveActivity(context.packageManager) != null
+        if (!canOpen) continue
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {
+            continue
+        }
     }
 }
