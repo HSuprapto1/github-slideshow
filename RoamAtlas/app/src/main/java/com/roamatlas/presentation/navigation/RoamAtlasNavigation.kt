@@ -1,0 +1,54 @@
+package com.roamatlas.presentation.navigation
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.QueryStats
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
+
+sealed class Screen(
+    val route: String,
+    val title: String,
+    val selectedIcon: ImageVector,
+    val unselectedIcon: ImageVector
+) {
+    data object Dashboard : Screen(
+        route = "dashboard",
+        title = "Dashboard",
+        selectedIcon = Icons.Filled.Dashboard,
+        unselectedIcon = Icons.Outlined.Dashboard
+    )
+    
+    data object Map : Screen(
+        route = "map",
+        title = "Map",
+        selectedIcon = Icons.Filled.Map,
+        unselectedIcon = Icons.Outlined.Map
+    )
+    
+    data object Statistics : Screen(
+        route = "statistics",
+        title = "Statistics",
+        selectedIcon = Icons.Filled.QueryStats,
+        unselectedIcon = Icons.Outlined.QueryStats
+    )
+    
+    data object Settings : Screen(
+        route = "settings",
+        title = "Settings",
+        selectedIcon = Icons.Filled.Settings,
+        unselectedIcon = Icons.Outlined.Settings
+    )
+}
+
+val bottomNavItems = listOf(
+    Screen.Dashboard,
+    Screen.Map,
+    Screen.Statistics,
+    Screen.Settings
+)
