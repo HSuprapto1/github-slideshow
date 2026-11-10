@@ -23,9 +23,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
-import com.roamatlas.presentation.screens.dashboard.DashboardScreen
+import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
-import com.roamatlas.presentation.screens.map.MapScreen
+import com.roamatlas.presentation.screens.map.MapScreenV2
+import com.roamatlas.presentation.screens.settings.HomeCountryScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
 import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
@@ -108,10 +109,10 @@ fun RoamAtlasApp(
                 modifier = Modifier.weight(1f)
             ) {
                 composable(Screen.Dashboard.route) {
-                    DashboardScreen()
+                    DashboardScreenV2()
                 }
                 composable(Screen.Map.route) {
-                    MapScreen()
+                    MapScreenV2()
                 }
                 composable(Screen.Statistics.route) {
                     StatisticsScreen()
@@ -123,6 +124,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToGpsTracking = {
                             navController.navigate(Screen.GpsTracking.route)
+                        },
+                        onNavigateToHomeCountry = {
+                            navController.navigate(Screen.HomeCountry.route)
                         }
                     )
                 }
@@ -135,6 +139,13 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.GpsTracking.route) {
                     GpsTrackingScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
+                composable(Screen.HomeCountry.route) {
+                    HomeCountryScreen(
                         onNavigateBack = {
                             navController.popBackStack()
                         }

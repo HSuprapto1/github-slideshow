@@ -54,6 +54,16 @@ sealed class Screen(
         route = "gps_tracking",
         title = "GPS Tracking"
     )
+    
+    data object HomeCountry : Screen(
+        route = "home_country",
+        title = "Home Country"
+    )
+    
+    data object AddFlight : Screen(
+        route = "add_flight",
+        title = "Add Flight"
+    )
 }
 
 val bottomNavItems = listOf(

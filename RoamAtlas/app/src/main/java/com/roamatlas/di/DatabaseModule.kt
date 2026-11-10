@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.room.Room
 import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.dao.DayTrackerDao
+import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.LocationDao
+import com.roamatlas.data.local.dao.UserSettingsDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -36,5 +38,15 @@ object DatabaseModule {
     @Provides
     fun provideDayTrackerDao(database: RoamAtlasDatabase): DayTrackerDao {
         return database.dayTrackerDao()
+    }
+    
+    @Provides
+    fun provideFlightDao(database: RoamAtlasDatabase): FlightDao {
+        return database.flightDao()
+    }
+    
+    @Provides
+    fun provideUserSettingsDao(database: RoamAtlasDatabase): UserSettingsDao {
+        return database.userSettingsDao()
     }
 }

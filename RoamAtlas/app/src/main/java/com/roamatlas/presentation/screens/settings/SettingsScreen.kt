@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
@@ -51,7 +52,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(
     onNavigateToImport: () -> Unit = {},
-    onNavigateToGpsTracking: () -> Unit = {}
+    onNavigateToGpsTracking: () -> Unit = {},
+    onNavigateToHomeCountry: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -103,6 +105,21 @@ fun SettingsScreen(
                         title = "GPS Tracking",
                         subtitle = "Start, stop, and configure location tracking",
                         onClick = onNavigateToGpsTracking
+                    )
+                }
+            }
+            
+            item {
+                SettingsSection(title = "Travel Settings")
+            }
+            
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.Home,
+                        title = "Home Country",
+                        subtitle = "Set your home country for travel statistics",
+                        onClick = onNavigateToHomeCountry
                     )
                 }
             }
