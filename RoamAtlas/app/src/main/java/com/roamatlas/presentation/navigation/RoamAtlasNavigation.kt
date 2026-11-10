@@ -14,8 +14,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 sealed class Screen(
     val route: String,
     val title: String,
-    val selectedIcon: ImageVector,
-    val unselectedIcon: ImageVector
+    val selectedIcon: ImageVector? = null,
+    val unselectedIcon: ImageVector? = null
 ) {
     data object Dashboard : Screen(
         route = "dashboard",
@@ -43,6 +43,11 @@ sealed class Screen(
         title = "Settings",
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings
+    )
+    
+    data object ImportTimeline : Screen(
+        route = "import_timeline",
+        title = "Import Timeline"
     )
 }
 

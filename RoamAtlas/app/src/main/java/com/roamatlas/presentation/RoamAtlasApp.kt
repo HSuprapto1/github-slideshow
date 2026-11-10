@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreen
+import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
@@ -47,7 +48,7 @@ fun RoamAtlasApp(
                         NavigationBarItem(
                             icon = {
                                 Icon(
-                                    imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                    imageVector = if (selected) screen.selectedIcon!! else screen.unselectedIcon!!,
                                     contentDescription = screen.title
                                 )
                             },
@@ -80,7 +81,7 @@ fun RoamAtlasApp(
                         NavigationRailItem(
                             icon = {
                                 Icon(
-                                    imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                    imageVector = if (selected) screen.selectedIcon!! else screen.unselectedIcon!!,
                                     contentDescription = screen.title
                                 )
                             },
@@ -115,7 +116,18 @@ fun RoamAtlasApp(
                     StatisticsScreen()
                 }
                 composable(Screen.Settings.route) {
-                    SettingsScreen()
+                    SettingsScreen(
+                        onNavigateToImport = {
+                            navController.navigate(Screen.ImportTimeline.route)
+                        }
+                    )
+                }
+                composable(Screen.ImportTimeline.route) {
+                    ImportTimelineScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        }
+                    )
                 }
             }
         }

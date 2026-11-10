@@ -49,7 +49,9 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    onNavigateToImport: () -> Unit = {}
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -77,7 +79,7 @@ fun SettingsScreen() {
                         icon = Icons.Default.CloudUpload,
                         title = "Import Google Timeline",
                         subtitle = "Import JSON export from Google Takeout",
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToImport
                     )
                     HorizontalDivider()
                     SettingsItem(
