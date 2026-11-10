@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
@@ -57,7 +58,8 @@ fun SettingsScreen(
     onNavigateToGpsTracking: () -> Unit = {},
     onNavigateToHomeCountry: () -> Unit = {},
     onNavigateToImportFlights: () -> Unit = {},
-    onNavigateToFlightReminders: () -> Unit = {}
+    onNavigateToFlightReminders: () -> Unit = {},
+    onNavigateToLocalTimelineImport: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -83,8 +85,15 @@ fun SettingsScreen(
             item {
                 SettingsCard {
                     SettingsItem(
+                        icon = Icons.Default.PhoneAndroid,
+                        title = "Import from Phone",
+                        subtitle = "Read Google Maps Timeline directly from device",
+                        onClick = onNavigateToLocalTimelineImport
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
                         icon = Icons.Default.CloudUpload,
-                        title = "Import Google Timeline",
+                        title = "Import Google Takeout",
                         subtitle = "Import JSON export from Google Takeout",
                         onClick = onNavigateToImport
                     )

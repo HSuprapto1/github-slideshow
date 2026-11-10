@@ -114,6 +114,9 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.androidx.datastore)
     
+    // DocumentFile for Storage Access Framework
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    
     // Image Loading
     implementation(libs.coil.compose)
     

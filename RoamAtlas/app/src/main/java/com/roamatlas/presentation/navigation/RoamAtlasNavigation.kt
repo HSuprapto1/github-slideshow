@@ -79,6 +79,11 @@ sealed class Screen(
         route = "flight_reminders",
         title = "Flight Reminders"
     )
+    
+    data object LocalTimelineImport : Screen(
+        route = "local_timeline_import",
+        title = "Import from Phone"
+    )
 }
 
 val bottomNavItems = listOf(
