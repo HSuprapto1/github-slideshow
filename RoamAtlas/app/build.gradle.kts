@@ -65,6 +65,14 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE"
+            excludes += "/META-INF/LICENSE.txt"
+            excludes += "/META-INF/license.txt"
+            excludes += "/META-INF/NOTICE"
+            excludes += "/META-INF/NOTICE.txt"
+            excludes += "/META-INF/notice.txt"
+            excludes += "/META-INF/INDEX.LIST"
         }
     }
 }
@@ -105,6 +113,18 @@ dependencies {
     // Data
     implementation(libs.gson)
     implementation(libs.androidx.datastore)
+    
+    // Image Loading
+    implementation(libs.coil.compose)
+    
+    // Google Auth & Gmail API
+    implementation(libs.play.services.auth)
+    implementation(libs.google.api.client.android) {
+        exclude(group = "org.apache.httpcomponents")
+    }
+    implementation(libs.google.api.services.gmail) {
+        exclude(group = "org.apache.httpcomponents")
+    }
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

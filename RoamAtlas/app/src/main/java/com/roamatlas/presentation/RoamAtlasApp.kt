@@ -26,6 +26,8 @@ import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
+import com.roamatlas.presentation.screens.flights.AddFlightScreen
+import com.roamatlas.presentation.screens.flights.ImportFlightsScreen
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
@@ -127,6 +129,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToHomeCountry = {
                             navController.navigate(Screen.HomeCountry.route)
+                        },
+                        onNavigateToImportFlights = {
+                            navController.navigate(Screen.ImportFlights.route)
                         }
                     )
                 }
@@ -148,6 +153,26 @@ fun RoamAtlasApp(
                     HomeCountryScreen(
                         onNavigateBack = {
                             navController.popBackStack()
+                        }
+                    )
+                }
+                composable(Screen.ImportFlights.route) {
+                    ImportFlightsScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        },
+                        onNavigateToAddFlight = {
+                            navController.navigate(Screen.AddFlight.route)
+                        }
+                    )
+                }
+                composable(Screen.AddFlight.route) {
+                    AddFlightScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        },
+                        onFlightAdded = {
+                            // Flight was added successfully
                         }
                     )
                 }

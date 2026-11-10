@@ -2,6 +2,7 @@ package com.roamatlas.di
 
 import android.content.Context
 import androidx.room.Room
+import com.roamatlas.data.email.BookingEmailParser
 import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.dao.DayTrackerDao
 import com.roamatlas.data.local.dao.FlightDao
@@ -48,5 +49,11 @@ object DatabaseModule {
     @Provides
     fun provideUserSettingsDao(database: RoamAtlasDatabase): UserSettingsDao {
         return database.userSettingsDao()
+    }
+    
+    @Provides
+    @Singleton
+    fun provideBookingEmailParser(): BookingEmailParser {
+        return BookingEmailParser()
     }
 }

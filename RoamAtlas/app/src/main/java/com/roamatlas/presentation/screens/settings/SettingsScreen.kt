@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
@@ -53,7 +54,8 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(
     onNavigateToImport: () -> Unit = {},
     onNavigateToGpsTracking: () -> Unit = {},
-    onNavigateToHomeCountry: () -> Unit = {}
+    onNavigateToHomeCountry: () -> Unit = {},
+    onNavigateToImportFlights: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -120,6 +122,13 @@ fun SettingsScreen(
                         title = "Home Country",
                         subtitle = "Set your home country for travel statistics",
                         onClick = onNavigateToHomeCountry
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
+                        icon = Icons.Default.FlightTakeoff,
+                        title = "Import Flights",
+                        subtitle = "Import from Gmail or add flights manually",
+                        onClick = onNavigateToImportFlights
                     )
                 }
             }

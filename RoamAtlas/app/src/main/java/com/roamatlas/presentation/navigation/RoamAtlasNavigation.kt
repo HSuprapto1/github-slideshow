@@ -64,6 +64,16 @@ sealed class Screen(
         route = "add_flight",
         title = "Add Flight"
     )
+    
+    data object ImportFlights : Screen(
+        route = "import_flights",
+        title = "Import Flights"
+    )
+    
+    data object FlightHistory : Screen(
+        route = "flight_history",
+        title = "Flight History"
+    )
 }
 
 val bottomNavItems = listOf(
