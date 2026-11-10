@@ -49,6 +49,13 @@
             </intent-filter>
         </activity>
 
+        <!-- GPS Tracking Foreground Service -->
+        <service
+            android:name=".data.location.LocationTrackingService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
     </application>
 
 </manifest>

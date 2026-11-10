@@ -49,6 +49,11 @@ sealed class Screen(
         route = "import_timeline",
         title = "Import Timeline"
     )
+    
+    data object GpsTracking : Screen(
+        route = "gps_tracking",
+        title = "GPS Tracking"
+    )
 }
 
 val bottomNavItems = listOf(

@@ -28,6 +28,7 @@ import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
+import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
 
 @Composable
 fun RoamAtlasApp(
@@ -119,11 +120,21 @@ fun RoamAtlasApp(
                     SettingsScreen(
                         onNavigateToImport = {
                             navController.navigate(Screen.ImportTimeline.route)
+                        },
+                        onNavigateToGpsTracking = {
+                            navController.navigate(Screen.GpsTracking.route)
                         }
                     )
                 }
                 composable(Screen.ImportTimeline.route) {
                     ImportTimelineScreen(
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
+                composable(Screen.GpsTracking.route) {
+                    GpsTrackingScreen(
                         onNavigateBack = {
                             navController.popBackStack()
                         }

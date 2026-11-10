@@ -50,7 +50,8 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigateToImport: () -> Unit = {}
+    onNavigateToImport: () -> Unit = {},
+    onNavigateToGpsTracking: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -96,21 +97,12 @@ fun SettingsScreen(
             }
             
             item {
-                var gpsEnabled by remember { mutableStateOf(false) }
                 SettingsCard {
-                    SettingsToggleItem(
-                        icon = Icons.Default.MyLocation,
-                        title = "Background GPS Tracking",
-                        subtitle = "Record locations automatically",
-                        checked = gpsEnabled,
-                        onCheckedChange = { gpsEnabled = it }
-                    )
-                    HorizontalDivider()
                     SettingsItem(
-                        icon = Icons.Default.LocationOn,
-                        title = "Tracking Settings",
-                        subtitle = "Interval, accuracy, battery optimization",
-                        onClick = { /* TODO */ }
+                        icon = Icons.Default.MyLocation,
+                        title = "GPS Tracking",
+                        subtitle = "Start, stop, and configure location tracking",
+                        onClick = onNavigateToGpsTracking
                     )
                 }
             }
