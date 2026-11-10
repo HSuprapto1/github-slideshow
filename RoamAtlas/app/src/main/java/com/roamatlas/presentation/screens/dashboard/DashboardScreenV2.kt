@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.roamatlas.domain.model.CountryVisitStats
 import com.roamatlas.domain.model.TravelStatistics
-import com.roamatlas.presentation.theme.DemoData
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -70,18 +69,7 @@ fun DashboardScreenV2(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text("RoamAtlas")
-                        if (uiState.isDemoData) {
-                            Text(
-                                text = "Demo Data",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = DemoData
-                            )
-                        }
-                    }
-                },
+                title = { Text("RoamAtlas") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -106,6 +94,9 @@ fun DashboardScreenV2(
             ) {
                 CircularProgressIndicator()
             }
+        } else if (!uiState.hasData) {
+            // Empty state - no data imported yet
+            EmptyStateScreen(modifier = Modifier.padding(paddingValues))
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -114,10 +105,6 @@ fun DashboardScreenV2(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                if (uiState.isDemoData) {
-                    item { DemoDataBanner() }
-                }
-                
                 item {
                     TravelOverviewSection(uiState.travelStats)
                 }
@@ -152,7 +139,7 @@ fun DashboardScreenV2(
                     }
                     
                     items(uiState.customTrackers) { result ->
-                        CustomTrackerCard(result, uiState.isDemoData)
+                        CustomTrackerCard(result)
                     }
                 }
                 
@@ -165,37 +152,109 @@ fun DashboardScreenV2(
 }
 
 @Composable
-private fun DemoDataBanner() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = DemoData.copy(alpha = 0.15f),
-        shape = RoundedCornerShape(12.dp)
+private fun EmptyStateScreen(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = DemoData,
-                modifier = Modifier.size(24.dp)
+        Icon(
+            imageVector = Icons.Default.TravelExplore,
+            contentDescription = null,
+            modifier = Modifier.size(120.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Text(
+            text = "Welcome to RoamAtlas",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "Your personal travel history companion",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
             )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp)
+            ) {
                 Text(
-                    text = "Showing Demo Data",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = DemoData
+                    text = "Get Started",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
-                Text(
-                    text = "Import your Google Timeline or enable GPS tracking to see real statistics.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                GetStartedItem(
+                    number = "1",
+                    text = "Import your Google Timeline from Settings"
+                )
+                GetStartedItem(
+                    number = "2",
+                    text = "Or enable GPS tracking to record new locations"
+                )
+                GetStartedItem(
+                    number = "3",
+                    text = "Add flights manually or import from Gmail"
                 )
             }
         }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            text = "Go to Settings to import your data",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun GetStartedItem(number: String, text: String) {
+    Row(
+        modifier = Modifier.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(
+            modifier = Modifier.size(24.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primary
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = number,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
 
@@ -548,8 +607,7 @@ private fun CountryChip(country: CountryVisitStats) {
 
 @Composable
 private fun CustomTrackerCard(
-    result: com.roamatlas.domain.model.TrackerResult,
-    isDemoData: Boolean
+    result: com.roamatlas.domain.model.TrackerResult
 ) {
     Card(
         modifier = Modifier

@@ -25,7 +25,7 @@ data class DashboardUiStateV2(
     val homeCountryCode: String? = null,
     val homeCountryName: String? = null,
     val isLoading: Boolean = true,
-    val isDemoData: Boolean = true,
+    val hasData: Boolean = false,
     val showAddTrackerDialog: Boolean = false
 )
 
@@ -51,14 +51,16 @@ class DashboardViewModelV2 @Inject constructor(
             val homeCountryCode = travelStatisticsRepository.getHomeCountryCode()
             
             if (locationCount == 0) {
+                // No data yet - show empty state (no demo data)
                 _uiState.value = DashboardUiStateV2(
-                    travelStats = generateDemoStatistics(),
+                    travelStats = TravelStatistics(),
                     customTrackers = emptyList(),
                     homeCountryCode = homeCountryCode,
                     isLoading = false,
-                    isDemoData = true
+                    hasData = false
                 )
             } else {
+                // Real data from user's imported locations
                 travelStatisticsRepository.getTravelStatistics().collect { stats ->
                     val trackers = dayTrackerRepository.getAllTrackers().first()
                     val trackerResults = calculateTrackerResults(trackers)
@@ -68,44 +70,11 @@ class DashboardViewModelV2 @Inject constructor(
                         customTrackers = trackerResults,
                         homeCountryCode = homeCountryCode,
                         isLoading = false,
-                        isDemoData = false
+                        hasData = true
                     )
                 }
             }
         }
-    }
-    
-    private fun generateDemoStatistics(): TravelStatistics {
-        return TravelStatistics(
-            totalCountriesVisited = 24,
-            totalCitiesVisited = 87,
-            totalLocationsRecorded = 15420,
-            totalFlights = 47,
-            totalFlightDistanceKm = 142580.0,
-            totalFlightDurationMinutes = 47 * 180,
-            longestFlightKm = 14200.0,
-            longestFlightRoute = "SIN → JFK",
-            mostVisitedCountry = "Japan",
-            mostVisitedCountryDays = 89,
-            daysOutsideHomeCountry = 287,
-            daysInsideHomeCountry = 78,
-            totalDaysTracked = 365,
-            earliestRecordDate = LocalDate.of(2020, 1, 15),
-            latestRecordDate = LocalDate.now(),
-            countriesVisitedList = listOf(
-                CountryVisitStats("JP", "Japan", 89, 12, null, null),
-                CountryVisitStats("US", "United States", 67, 8, null, null),
-                CountryVisitStats("GB", "United Kingdom", 45, 5, null, null),
-                CountryVisitStats("TH", "Thailand", 34, 6, null, null),
-                CountryVisitStats("SG", "Singapore", 28, 15, null, null),
-                CountryVisitStats("FR", "France", 21, 3, null, null),
-                CountryVisitStats("DE", "Germany", 18, 4, null, null),
-                CountryVisitStats("IT", "Italy", 15, 2, null, null),
-                CountryVisitStats("AU", "Australia", 14, 2, null, null),
-                CountryVisitStats("NL", "Netherlands", 12, 3, null, null)
-            ),
-            yearlyStats = emptyList()
-        )
     }
     
     private suspend fun calculateTrackerResults(trackers: List<DayTracker>): List<TrackerResult> {
