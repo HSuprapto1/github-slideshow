@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background circle -->
+    <path
+        android:fillColor="#0061A4"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
+    
+    <!-- Globe outline -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,30 A24,24 0 1,1 54,78 A24,24 0 1,1 54,30" />
+    
+    <!-- Horizontal line -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M30,54 L78,54" />
+    
+    <!-- Vertical ellipse -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,30 Q42,54 54,78 Q66,54 54,30" />
+    
+    <!-- Location pin -->
+    <path
+        android:fillColor="#FFB951"
+        android:pathData="M54,40 C48,40 43,45 43,51 C43,59 54,68 54,68 C54,68 65,59 65,51 C65,45 60,40 54,40 Z M54,55 C51.5,55 49.5,53 49.5,50.5 C49.5,48 51.5,46 54,46 C56.5,46 58.5,48 58.5,50.5 C58.5,53 56.5,55 54,55 Z" />
+    
+</vector>
