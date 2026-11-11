@@ -102,14 +102,34 @@ class DayAuditViewModel @Inject constructor(
     }
 
     fun markDayOutside(date: LocalDate) {
+        setDayClassification(date, ManualDayClassification.OUTSIDE)
+    }
+
+    fun markDayInside(date: LocalDate) {
+        setDayClassification(date, ManualDayClassification.INSIDE)
+    }
+
+    private fun setDayClassification(
+        date: LocalDate,
+        classification: ManualDayClassification
+    ) {
         val countryCode = _uiState.value.selectedCountryCode
         viewModelScope.launch {
             dayOverrideRepository.setOverride(
                 countryCode,
                 date,
-                ManualDayClassification.OUTSIDE
+                classification
             )
-            loadEvidence()
+            _uiState.value = _uiState.value.copy(
+                days = _uiState.value.days.map { day ->
+                    if (day.date == date) {
+                        day.copy(manualClassification = classification)
+                    } else {
+                        day
+                    }
+                }
+            )
+            calculateSummary()
         }
     }
 
@@ -117,7 +137,16 @@ class DayAuditViewModel @Inject constructor(
         val countryCode = _uiState.value.selectedCountryCode
         viewModelScope.launch {
             dayOverrideRepository.removeOverride(countryCode, date)
-            loadEvidence()
+            _uiState.value = _uiState.value.copy(
+                days = _uiState.value.days.map { day ->
+                    if (day.date == date) {
+                        day.copy(manualClassification = null)
+                    } else {
+                        day
+                    }
+                }
+            )
+            calculateSummary()
         }
     }
 

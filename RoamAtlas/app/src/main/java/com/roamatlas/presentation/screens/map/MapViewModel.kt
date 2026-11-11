@@ -105,6 +105,30 @@ class MapViewModel @Inject constructor(
         )
         loadLocations()
     }
+
+    fun showLocalDate(date: LocalDate) {
+        locationsJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            filterStartDate = date,
+            filterEndDate = date,
+            filterCountryCode = null,
+            isLoading = true
+        )
+        locationsJob = viewModelScope.launch {
+            locationRepository.getLocationsForLocalDate(date, MAX_MAP_POINTS)
+                .collect { locations ->
+                    val center = calculateCenter(locations)
+                    _uiState.value = _uiState.value.copy(
+                        locations = locations,
+                        totalLocations = locations.size,
+                        mapCenterLat = center.first,
+                        mapCenterLng = center.second,
+                        mapZoom = if (locations.isEmpty()) 2f else calculateZoom(locations),
+                        isLoading = false
+                    )
+                }
+        }
+    }
     
     fun setCountryFilter(countryCode: String?) {
         _uiState.value = _uiState.value.copy(filterCountryCode = countryCode)

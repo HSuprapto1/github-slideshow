@@ -208,7 +208,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.Info,
                         title = "About RoamAtlas",
-                        subtitle = "Version 0.12.0",
+                        subtitle = "Version 0.13.0",
                         onClick = { /* TODO */ }
                     )
                     HorizontalDivider()

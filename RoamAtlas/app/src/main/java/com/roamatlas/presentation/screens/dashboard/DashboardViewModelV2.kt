@@ -89,29 +89,32 @@ class DashboardViewModelV2 @Inject constructor(
     private suspend fun calculateTrackerResults(trackers: List<DayTracker>): List<TrackerResult> {
         return trackers.map { tracker ->
             val (startMillis, endMillis) = getDateRangeForTracker(tracker)
-            val daysCount = locationRepository.countDaysInCountry(
-                tracker.countryCode,
-                startMillis,
-                endMillis
-            )
             val trackedDays = locationRepository.countTrackedDays(startMillis, endMillis)
+            val zone = java.time.ZoneId.systemDefault()
+            val startDate = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
+            val endDate = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
+            val overrides = dayOverrideRepository.getOverrides(tracker.countryCode)
+                .filterKeys { it in startDate..endDate }
+            val manualOutside = overrides.filterValues {
+                it == ManualDayClassification.OUTSIDE
+            }.keys
+            val manualInside = overrides.filterValues {
+                it == ManualDayClassification.INSIDE
+            }.keys
             val resultDays = if (tracker.countInsideCountry) {
-                daysCount
+                val evidenceDates = locationRepository.getDaysInCountry(
+                    tracker.countryCode,
+                    startMillis,
+                    endMillis
+                )
+                ((evidenceDates + manualInside) - manualOutside).size
             } else {
                 val evidenceDates = locationRepository.getDaysOutsideCountry(
                     tracker.countryCode,
                     startMillis,
                     endMillis
                 )
-                val zone = java.time.ZoneId.systemDefault()
-                val startDate = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
-                val endDate = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
-                val manualDates = dayOverrideRepository.getOverrides(tracker.countryCode)
-                    .filter { (date, classification) ->
-                        classification == ManualDayClassification.OUTSIDE &&
-                            date in startDate..endDate
-                    }.keys
-                (evidenceDates + manualDates).size
+                ((evidenceDates + manualOutside) - manualInside).size
             }
             
             TrackerResult(

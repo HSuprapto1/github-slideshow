@@ -25,6 +25,10 @@ interface LocationRepository {
         sampleEvery: Int,
         limit: Int
     ): Flow<List<LocationRecord>>
+    fun getLocationsForLocalDate(
+        localDate: LocalDate,
+        limit: Int = 5_000
+    ): Flow<List<LocationRecord>>
     
     suspend fun getLocationById(id: Long): LocationRecord?
     suspend fun getEarliestTimestamp(): Long?
@@ -35,6 +39,11 @@ interface LocationRepository {
     suspend fun deleteLocation(location: LocationRecord)
     suspend fun deleteAllLocations()
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
+    suspend fun getDaysInCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Set<LocalDate>
     suspend fun countDaysOutsideCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
     suspend fun getDaysOutsideCountry(
         countryCode: String,

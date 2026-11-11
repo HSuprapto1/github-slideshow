@@ -77,6 +77,20 @@ interface LocationDao {
         limit: Int
     ): Flow<List<LocationEntity>>
 
+    @Query("""
+        SELECT * FROM locations
+        WHERE DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ) = :localDate
+        ORDER BY timestampMillis ASC
+        LIMIT :limit
+    """)
+    fun getLocationsForLocalDate(
+        localDate: String,
+        limit: Int
+    ): Flow<List<LocationEntity>>
+
     @Query("SELECT COUNT(DISTINCT city) FROM locations WHERE city IS NOT NULL AND city != ''")
     suspend fun countDistinctCities(): Int
 

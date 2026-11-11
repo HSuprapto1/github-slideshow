@@ -66,6 +66,7 @@ import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
@@ -73,15 +74,21 @@ import com.roamatlas.presentation.theme.DemoData
 import com.roamatlas.presentation.theme.UncertainLocation
 import com.roamatlas.presentation.theme.VerifiedLocation
 import java.time.ZoneId
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreenV2(
+    initialDate: LocalDate? = null,
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
+
+    LaunchedEffect(initialDate) {
+        initialDate?.let(viewModel::showLocalDate)
+    }
     
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
@@ -106,7 +113,9 @@ fun MapScreenV2(
             TopAppBar(
                 title = {
                     Column {
-                        Text("World Map")
+                        Text(
+                            initialDate?.let { "Track · $it" } ?: "World Map"
+                        )
                         Text(
                             text = "${uiState.totalLocations} locations",
                             style = MaterialTheme.typography.labelSmall,
@@ -175,6 +184,16 @@ fun MapScreenV2(
                         uiState.locations.filterIndexed { index, _ -> index % (uiState.locations.size / 1000) == 0 }
                     } else {
                         uiState.locations
+                    }
+
+                    if (displayLocations.size >= 2) {
+                        Polyline(
+                            points = displayLocations.map {
+                                LatLng(it.latitude, it.longitude)
+                            },
+                            color = Color(0xFF1565C0),
+                            width = 7f
+                        )
                     }
                     
                     displayLocations.forEach { location ->

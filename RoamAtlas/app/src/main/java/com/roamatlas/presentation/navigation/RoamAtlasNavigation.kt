@@ -31,7 +31,10 @@ sealed class Screen(
         title = "Map",
         selectedIcon = Icons.Filled.Map,
         unselectedIcon = Icons.Outlined.Map
-    )
+    ) {
+        const val DAY_ROUTE = "map/day/{date}"
+        fun forDate(date: String) = "map/day/$date"
+    }
 
     data object Days : Screen(
         route = "days",

@@ -58,6 +58,13 @@ class LocationRepositoryImpl @Inject constructor(
     ): Flow<List<LocationRecord>> =
         locationDao.getMapSample(startMillis, endMillis, countryCode, sampleEvery, limit)
             .map { entities -> entities.map { it.toDomain() } }
+
+    override fun getLocationsForLocalDate(
+        localDate: LocalDate,
+        limit: Int
+    ): Flow<List<LocationRecord>> =
+        locationDao.getLocationsForLocalDate(localDate.toString(), limit)
+            .map { entities -> entities.map { it.toDomain() } }
     
     override suspend fun getLocationById(id: Long): LocationRecord? {
         return locationDao.getLocationById(id)?.toDomain()
@@ -94,6 +101,14 @@ class LocationRepositoryImpl @Inject constructor(
     override suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int {
         return locationDao.countDaysInCountry(countryCode, startMillis, endMillis)
     }
+
+    override suspend fun getDaysInCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Set<LocalDate> = locationDao.getDaysInCountry(countryCode, startMillis, endMillis)
+        .mapNotNull { runCatching { LocalDate.parse(it.date) }.getOrNull() }
+        .toSet()
 
     override suspend fun countDaysOutsideCountry(
         countryCode: String,

@@ -36,6 +36,7 @@ import com.roamatlas.presentation.screens.settings.BackupScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
 import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
+import java.time.LocalDate
 
 @Composable
 fun RoamAtlasApp(
@@ -52,7 +53,10 @@ fun RoamAtlasApp(
             if (!useNavigationRail) {
                 NavigationBar {
                     bottomNavItems.forEach { screen ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == screen.route ||
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true)
+                        } == true
                         NavigationBarItem(
                             icon = {
                                 Icon(
@@ -85,7 +89,10 @@ fun RoamAtlasApp(
             if (useNavigationRail) {
                 NavigationRail {
                     bottomNavItems.forEach { screen ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == screen.route ||
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true)
+                        } == true
                         NavigationRailItem(
                             icon = {
                                 Icon(
@@ -124,8 +131,16 @@ fun RoamAtlasApp(
                 composable(Screen.Map.route) {
                     MapScreenV2()
                 }
+                composable(Screen.Map.DAY_ROUTE) { entry ->
+                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                    MapScreenV2(initialDate = date)
+                }
                 composable(Screen.Days.route) {
-                    DayAuditScreen()
+                    DayAuditScreen(
+                        onOpenMap = { date ->
+                            navController.navigate(Screen.Map.forDate(date.toString()))
+                        }
+                    )
                 }
                 composable(Screen.Statistics.route) {
                     StatisticsScreen()

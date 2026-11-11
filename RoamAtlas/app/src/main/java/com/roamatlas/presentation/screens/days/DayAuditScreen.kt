@@ -57,6 +57,7 @@ import java.time.format.FormatStyle
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DayAuditScreen(
+    onOpenMap: (LocalDate) -> Unit = {},
     viewModel: DayAuditViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -179,7 +180,9 @@ fun DayAuditScreen(
                         day = day,
                         selectedCountryCode = state.selectedCountryCode,
                         selectedCountryName = state.selectedCountryName,
+                        onOpenMap = { onOpenMap(day.date) },
                         onMarkOutside = { viewModel.markDayOutside(day.date) },
+                        onMarkInside = { viewModel.markDayInside(day.date) },
                         onRemoveOverride = { viewModel.removeDayOverride(day.date) }
                     )
                 }
@@ -265,17 +268,31 @@ private fun DayEvidenceCard(
     day: AuditedDay,
     selectedCountryCode: String,
     selectedCountryName: String,
+    onOpenMap: () -> Unit,
     onMarkOutside: () -> Unit,
+    onMarkInside: () -> Unit,
     onRemoveOverride: () -> Unit
 ) {
     val hasConfirmedOutside = day.evidence.any {
         it.countryCode != null && it.countryCode != selectedCountryCode
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val hasSelectedCountry = day.evidence.any {
+        it.countryCode == selectedCountryCode
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenMap)
+    ) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 day.date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)),
                 fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Tap this date to view its track on the map",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
             )
             if (!day.hasRecordedPoint) {
                 Text("No recorded locations", color = MaterialTheme.colorScheme.error)
@@ -293,38 +310,59 @@ private fun DayEvidenceCard(
                     )
                 }
             }
-            when {
-                day.manualClassification == ManualDayClassification.OUTSIDE -> {
-                    Text(
-                        "User confirmed: count as outside $selectedCountryName",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    TextButton(onClick = onRemoveOverride) {
-                        Text("Undo decision")
-                    }
+            val automaticMeaning = when {
+                hasConfirmedOutside ->
+                    "Outside evidence found. This date counts outside unless you change it."
+                hasSelectedCountry && day.evidence.none { it.countryCode == null } ->
+                    "Only $selectedCountryName evidence was found. This date counts inside."
+                day.evidence.any { it.countryCode == null } ->
+                    "Country is uncertain or offshore. Please choose how this date should count."
+                else ->
+                    "No location evidence. You can still classify this date manually."
+            }
+            Text(
+                text = when (day.manualClassification) {
+                    ManualDayClassification.OUTSIDE ->
+                        "Your decision: count as outside $selectedCountryName"
+                    ManualDayClassification.INSIDE ->
+                        "Your decision: do not count as outside $selectedCountryName"
+                    null -> automaticMeaning
+                },
+                color = if (day.manualClassification != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                fontWeight = if (day.manualClassification != null) {
+                    FontWeight.SemiBold
+                } else {
+                    FontWeight.Normal
+                },
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onMarkOutside,
+                    enabled = day.manualClassification != ManualDayClassification.OUTSIDE,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Count outside", textAlign = TextAlign.Center)
                 }
-                !hasConfirmedOutside && day.evidence.any { it.countryCode == null } -> {
-                    Text(
-                        "The recorded point is outside known country land polygons. It may be offshore.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    OutlinedButton(
-                        onClick = onMarkOutside,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Count this date as outside")
-                    }
+                OutlinedButton(
+                    onClick = onMarkInside,
+                    enabled = day.manualClassification != ManualDayClassification.INSIDE,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Not outside", textAlign = TextAlign.Center)
                 }
-                !hasConfirmedOutside && !day.hasRecordedPoint -> {
-                    OutlinedButton(
-                        onClick = onMarkOutside,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("I was outside — count this date")
-                    }
+            }
+            if (day.manualClassification != null) {
+                TextButton(onClick = onRemoveOverride) {
+                    Text("Use automatic result")
                 }
             }
         }

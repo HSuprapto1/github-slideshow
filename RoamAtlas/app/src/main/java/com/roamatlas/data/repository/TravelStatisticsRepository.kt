@@ -161,7 +161,11 @@ class TravelStatisticsRepository @Inject constructor(
     private suspend fun calculateDaysInsideOutside(homeCountryCode: String): Pair<Int, Int> {
         val earliest = locationDao.getEarliestTimestamp() ?: return Pair(0, 0)
         val latest = locationDao.getLatestTimestamp() ?: return Pair(0, 0)
-        val daysInHome = locationDao.countDaysInCountry(homeCountryCode, earliest, latest)
+        val insideEvidenceDates = locationDao.getDaysInCountry(
+            homeCountryCode,
+            earliest,
+            latest
+        ).mapNotNull { runCatching { LocalDate.parse(it.date) }.getOrNull() }.toSet()
         val evidenceDates = locationDao.getDaysOutsideCountry(homeCountryCode, earliest, latest)
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
             .toSet()
@@ -169,12 +173,16 @@ class TravelStatisticsRepository @Inject constructor(
             .atZone(ZoneId.systemDefault()).toLocalDate()
         val lastDate = Instant.ofEpochMilli(latest)
             .atZone(ZoneId.systemDefault()).toLocalDate()
-        val confirmedDates = dayOverrideRepository.getOverrides(homeCountryCode)
-            .filter { (date, classification) ->
-                classification == ManualDayClassification.OUTSIDE &&
-                    date in firstDate..lastDate
-            }.keys
-        val daysOutside = (evidenceDates + confirmedDates).size
+        val overrides = dayOverrideRepository.getOverrides(homeCountryCode)
+            .filterKeys { it in firstDate..lastDate }
+        val manualOutside = overrides.filterValues {
+            it == ManualDayClassification.OUTSIDE
+        }.keys
+        val manualInside = overrides.filterValues {
+            it == ManualDayClassification.INSIDE
+        }.keys
+        val daysInHome = ((insideEvidenceDates + manualInside) - manualOutside).size
+        val daysOutside = ((evidenceDates + manualOutside) - manualInside).size
         
         return Pair(daysInHome, daysOutside)
     }
