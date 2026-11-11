@@ -146,7 +146,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.NotificationsActive,
                         title = "Flight Reminders",
-                        subtitle = "Smart reminders based on location & traffic",
+                        subtitle = "Distance estimates with links to live traffic and status",
                         onClick = onNavigateToFlightReminders
                     )
                 }

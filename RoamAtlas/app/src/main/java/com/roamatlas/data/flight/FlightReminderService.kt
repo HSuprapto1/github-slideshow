@@ -75,13 +75,6 @@ class FlightReminderService : Service() {
         // Airport proximity threshold: 50km (considered "at airport area")
         const val AIRPORT_PROXIMITY_KM = 50.0
         
-        // Recommended hours before departure to be at airport
-        const val HOURS_BEFORE_DEPARTURE = 2
-        
-        // Alert thresholds
-        const val HOURS_ADVANCE_WARNING = 6  // Start warning 6 hours before
-        const val HOURS_URGENT_WARNING = 3   // Urgent warning 3 hours before
-        
         fun start(context: Context) {
             val intent = Intent(context, FlightReminderService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -262,7 +255,7 @@ class FlightReminderService : Service() {
             // URGENT: Less than 3 hours, not near airport, might miss flight
             hoursUntilFlight <= settings.urgentWarningHours && !isNearAirport &&
                 settings.notifyPossibleMissed -> {
-                val distanceText = String.format("%.1f km", distanceToAirport)
+                val distanceText = String.format(Locale.getDefault(), "%.1f km", distanceToAirport)
                 sendNotification(
                     id = NOTIFICATION_ID_WARNING,
                     title = "⚠️ URGENT: Flight in ${hoursUntilFlight}h!",

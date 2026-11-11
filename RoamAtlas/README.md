@@ -76,12 +76,14 @@ RoamAtlas/
 ## Roadmap
 
 - [x] Project setup and architecture
-- [x] Dashboard with demo data
-- [ ] Google Timeline JSON import
-- [ ] GPS background tracking service
-- [ ] Full Google Maps integration
-- [ ] Day counting calculations
-- [ ] Data export functionality
+- [x] Dashboard and statistics using real user data
+- [x] Streaming Google on-device Timeline import
+- [x] Persistent GPS background tracking service
+- [x] Google Maps integration with scalable sampling
+- [x] Offline country and city attribution
+- [x] Country day counting and transit classification
+- [x] AES-256 encrypted export and restore
+- [x] Location-aware flight reminders with live traffic/status links
 - [ ] Foldable screen optimizations
 
 ## Troubleshooting

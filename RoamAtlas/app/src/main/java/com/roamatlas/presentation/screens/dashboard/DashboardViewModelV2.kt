@@ -107,21 +107,21 @@ class DashboardViewModelV2 @Inject constructor(
                 val year = tracker.year ?: now.year
                 val start = LocalDate.of(year, 1, 1)
                 val end = LocalDate.of(year, 12, 31)
-                start.toEpochMilli() to end.toEpochMilli()
+                start.toEpochMilli() to end.inclusiveEndMillis()
             }
             com.roamatlas.domain.model.CountingMode.CUSTOM_DATE_RANGE -> {
                 val start = tracker.startDate ?: now.minusYears(1)
                 val end = tracker.endDate ?: now
-                start.toEpochMilli() to end.toEpochMilli()
+                start.toEpochMilli() to end.inclusiveEndMillis()
             }
             com.roamatlas.domain.model.CountingMode.ROLLING_12_MONTHS -> {
                 val end = now
                 val start = now.minusYears(1)
-                start.toEpochMilli() to end.toEpochMilli()
+                start.toEpochMilli() to end.inclusiveEndMillis()
             }
             com.roamatlas.domain.model.CountingMode.CUSTOM_START_UNTIL_TODAY -> {
                 val start = tracker.startDate ?: now.minusYears(1)
-                start.toEpochMilli() to now.toEpochMilli()
+                start.toEpochMilli() to now.inclusiveEndMillis()
             }
         }
     }
@@ -133,6 +133,8 @@ class DashboardViewModelV2 @Inject constructor(
     private fun LocalDate.toEpochMilli(): Long {
         return this.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
+
+    private fun LocalDate.inclusiveEndMillis(): Long = plusDays(1).toEpochMilli() - 1
     
     fun refresh() {
         loadDashboardData()
