@@ -137,10 +137,10 @@ fun FlightRemindersScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "• Monitors your location before upcoming flights\n" +
-                               "• Calculates travel time to the airport\n" +
-                               "• Reminds you when to leave based on traffic\n" +
-                               "• Warns if you might miss your flight\n" +
-                               "• Detects cancelled/rescheduled flights",
+                               "• Gives a distance-based departure estimate\n" +
+                               "• Opens Google Maps for current traffic\n" +
+                               "• Warns if your location suggests you may miss the flight\n" +
+                               "• Links to live airline status; it does not guess cancellations",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

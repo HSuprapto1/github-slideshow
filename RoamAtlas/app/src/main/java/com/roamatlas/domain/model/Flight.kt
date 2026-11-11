@@ -61,8 +61,16 @@ data class CountryVisitStats(
     val daysSpent: Int,
     val visitCount: Int,
     val firstVisit: LocalDate? = null,
-    val lastVisit: LocalDate? = null
+    val lastVisit: LocalDate? = null,
+    val classification: CountryVisitClassification = CountryVisitClassification.VISITED,
+    val classificationReason: String? = null
 )
+
+enum class CountryVisitClassification {
+    VISITED,
+    TRANSIT,
+    UNCERTAIN
+}
 
 data class YearlyTravelStats(
     val year: Int,

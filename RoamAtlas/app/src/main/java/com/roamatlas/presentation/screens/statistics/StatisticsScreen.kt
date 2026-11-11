@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.roamatlas.domain.model.CountryVisitClassification
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,7 +151,13 @@ fun StatisticsScreen(
             item {
                 CountryListCard(
                     countries = statistics.countriesVisitedList.map {
-                        CountryStats(it.countryName, it.countryCode, it.daysSpent)
+                        CountryStats(
+                            it.countryName,
+                            it.countryCode,
+                            it.daysSpent,
+                            it.classification,
+                            it.classificationReason
+                        )
                     }
                 )
             }
@@ -227,7 +234,9 @@ private fun StatCard(
 data class CountryStats(
     val name: String,
     val code: String,
-    val days: Int
+    val days: Int,
+    val classification: CountryVisitClassification,
+    val reason: String?
 )
 
 @Composable
@@ -265,6 +274,17 @@ private fun CountryListCard(countries: List<CountryStats>) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
+                            if (country.classification != CountryVisitClassification.VISITED) {
+                                Text(
+                                    text = if (country.classification == CountryVisitClassification.TRANSIT) {
+                                        "Transit"
+                                    } else {
+                                        "Possible transit"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
                         }
                     }
                     Column(horizontalAlignment = Alignment.End) {

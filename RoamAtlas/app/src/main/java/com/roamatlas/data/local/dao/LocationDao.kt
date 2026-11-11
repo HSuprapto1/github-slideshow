@@ -107,6 +107,16 @@ interface LocationDao {
 
     @Query("SELECT * FROM locations WHERE id > :afterId ORDER BY id ASC LIMIT :limit")
     suspend fun getPage(afterId: Long, limit: Int): List<LocationEntity>
+
+    @Query("""
+        SELECT countryCode FROM locations
+        WHERE timestampMillis BETWEEN :startMillis AND :endMillis
+          AND countryCode IS NOT NULL
+        GROUP BY countryCode
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """)
+    suspend fun getDominantCountryBetween(startMillis: Long, endMillis: Long): String?
     
     @Query("SELECT MIN(timestampMillis) FROM locations")
     suspend fun getEarliestTimestamp(): Long?

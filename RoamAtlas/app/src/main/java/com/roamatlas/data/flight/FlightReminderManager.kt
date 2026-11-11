@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -77,8 +78,9 @@ class FlightReminderManager @Inject constructor(
         }
     }
     
-    fun startServiceIfEnabled() {
-        // Called on app startup to resume service if it was enabled
-        // The actual check happens in the coroutine
+    suspend fun startServiceIfEnabled() {
+        if (settings.first().isEnabled) {
+            FlightReminderService.start(context)
+        }
     }
 }

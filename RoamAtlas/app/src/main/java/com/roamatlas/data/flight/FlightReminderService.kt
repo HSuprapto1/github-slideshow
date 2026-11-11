@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ActivityCompat
@@ -42,15 +43,18 @@ import kotlin.math.sin
  * 
  * Features:
  * - Detects if user is not near departure airport before flight
- * - Sends reminders based on traffic and travel time
- * - Warns about potentially cancelled/missed flights
- * - Recommends departure time (2 hours before flight + travel time)
+ * - Sends distance-based reminders and links to Google Maps live traffic
+ * - Warns when the current location indicates the flight could be missed
+ * - Links to a live airline-status search instead of claiming a cancellation
  */
 @AndroidEntryPoint
 class FlightReminderService : Service() {
     
     @Inject
     lateinit var flightDao: FlightDao
+
+    @Inject
+    lateinit var reminderManager: FlightReminderManager
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var notificationManager: NotificationManager
@@ -156,6 +160,11 @@ class FlightReminderService : Service() {
             
             // Get flights in the next 24 hours
             val upcomingFlights = flightDao.getFlightsBetween(now, next24Hours).first()
+            val settings = reminderManager.settings.first()
+            if (!settings.isEnabled) {
+                stopSelf()
+                return
+            }
             
             if (upcomingFlights.isEmpty()) return
             
@@ -163,7 +172,7 @@ class FlightReminderService : Service() {
             val currentLocation = getCurrentLocation() ?: return
             
             for (flight in upcomingFlights) {
-                analyzeFlightStatus(flight, currentLocation, now)
+                analyzeFlightStatus(flight, currentLocation, now, settings)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -200,7 +209,12 @@ class FlightReminderService : Service() {
         }
     }
     
-    private fun analyzeFlightStatus(flight: FlightEntity, currentLocation: Location, now: Long) {
+    private fun analyzeFlightStatus(
+        flight: FlightEntity,
+        currentLocation: Location,
+        now: Long,
+        settings: FlightReminderSettings
+    ) {
         val departureTime = flight.departureTimeMillis
         val hoursUntilFlight = TimeUnit.MILLISECONDS.toHours(departureTime - now)
         val minutesUntilFlight = TimeUnit.MILLISECONDS.toMinutes(departureTime - now)
@@ -218,11 +232,11 @@ class FlightReminderService : Service() {
             airportCoords.first, airportCoords.second
         )
         
-        // Estimate travel time (rough estimate: 30km/h average with traffic)
-        val estimatedTravelMinutes = (distanceToAirport / 30.0 * 60).toLong()
+        // Distance-based estimate only. The notification links to live traffic.
+        val estimatedTravelMinutes = maxOf(15L, (distanceToAirport / 40.0 * 60).toLong())
         
         // Calculate when user should leave (travel time + 2 hours buffer)
-        val requiredDepartureMinutes = estimatedTravelMinutes + (HOURS_BEFORE_DEPARTURE * 60)
+        val requiredDepartureMinutes = estimatedTravelMinutes + (settings.hoursBeforeDeparture * 60)
         val shouldLeaveBy = departureTime - TimeUnit.MINUTES.toMillis(requiredDepartureMinutes)
         val minutesUntilShouldLeave = TimeUnit.MILLISECONDS.toMinutes(shouldLeaveBy - now)
         
@@ -233,29 +247,36 @@ class FlightReminderService : Service() {
         
         when {
             // User is already near airport - all good
-            isNearAirport && hoursUntilFlight <= HOURS_ADVANCE_WARNING -> {
+            isNearAirport && hoursUntilFlight <= settings.advanceWarningHours &&
+                settings.notifyWhenAtAirport -> {
                 sendNotification(
                     id = NOTIFICATION_ID_REMINDER,
                     title = "✈️ You're at the airport!",
                     message = "Flight $route departs at $flightTime. Have a safe journey!",
-                    priority = NotificationCompat.PRIORITY_DEFAULT
+                    priority = NotificationCompat.PRIORITY_DEFAULT,
+                    airportCoords = airportCoords,
+                    flight = flight
                 )
             }
             
             // URGENT: Less than 3 hours, not near airport, might miss flight
-            hoursUntilFlight <= HOURS_URGENT_WARNING && !isNearAirport -> {
+            hoursUntilFlight <= settings.urgentWarningHours && !isNearAirport &&
+                settings.notifyPossibleMissed -> {
                 val distanceText = String.format("%.1f km", distanceToAirport)
                 sendNotification(
                     id = NOTIFICATION_ID_WARNING,
                     title = "⚠️ URGENT: Flight in ${hoursUntilFlight}h!",
-                    message = "You're $distanceText from ${flight.departureAirportCode}! " +
-                            "Flight $route at $flightTime. You may miss your flight!",
-                    priority = NotificationCompat.PRIORITY_HIGH
+                    message = "You're $distanceText from ${flight.departureAirportCode}. " +
+                            "Flight $route is scheduled at $flightTime. Check live traffic and airline status.",
+                    priority = NotificationCompat.PRIORITY_HIGH,
+                    airportCoords = airportCoords,
+                    flight = flight
                 )
             }
             
             // WARNING: 3-6 hours before, should leave soon
-            hoursUntilFlight in (HOURS_URGENT_WARNING + 1)..HOURS_ADVANCE_WARNING && !isNearAirport -> {
+            hoursUntilFlight in (settings.urgentWarningHours + 1)..settings.advanceWarningHours &&
+                !isNearAirport -> {
                 if (minutesUntilShouldLeave <= 60) {
                     // Should leave within the hour
                     val leaveTime = timeFormatter.format(Date(shouldLeaveBy))
@@ -263,8 +284,10 @@ class FlightReminderService : Service() {
                         id = NOTIFICATION_ID_REMINDER,
                         title = "🚗 Time to head to airport!",
                         message = "Leave by $leaveTime to catch flight $route at $flightTime. " +
-                                "Estimated travel: ${estimatedTravelMinutes}min + 2h airport time.",
-                        priority = NotificationCompat.PRIORITY_HIGH
+                                "Distance estimate: ${estimatedTravelMinutes}min + ${settings.hoursBeforeDeparture}h airport time. Check live traffic.",
+                        priority = NotificationCompat.PRIORITY_HIGH,
+                        airportCoords = airportCoords,
+                        flight = flight
                     )
                 } else if (minutesUntilShouldLeave <= 120) {
                     // Should leave within 2 hours
@@ -273,37 +296,66 @@ class FlightReminderService : Service() {
                         id = NOTIFICATION_ID_REMINDER,
                         title = "📍 Upcoming flight reminder",
                         message = "Flight $route at $flightTime. " +
-                                "Suggested departure: $leaveTime (${estimatedTravelMinutes}min travel + 2h buffer).",
-                        priority = NotificationCompat.PRIORITY_DEFAULT
+                            "Suggested departure: $leaveTime (${estimatedTravelMinutes}min distance estimate + ${settings.hoursBeforeDeparture}h buffer). Check live traffic.",
+                        priority = NotificationCompat.PRIORITY_DEFAULT,
+                        airportCoords = airportCoords,
+                        flight = flight
                     )
                 }
             }
             
-            // Flight time passed but user wasn't at airport - likely cancelled/missed
-            now > departureTime && !isNearAirport -> {
-                sendNotification(
-                    id = NOTIFICATION_ID_WARNING,
-                    title = "❓ Flight status check",
-                    message = "Flight $route was scheduled for $flightTime. " +
-                            "You weren't detected near ${flight.departureAirportCode}. " +
-                            "Was this flight cancelled or rescheduled?",
-                    priority = NotificationCompat.PRIORITY_DEFAULT
-                )
-            }
         }
     }
     
-    private fun sendNotification(id: Int, title: String, message: String, priority: Int) {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun sendNotification(
+        id: Int,
+        title: String,
+        message: String,
+        priority: Int,
+        airportCoords: Pair<Double, Double>? = null,
+        flight: FlightEntity? = null
+    ) {
+        val notificationKey = "${flight?.id}:$id:$title"
+        val sent = getSharedPreferences("flight_notification_history", MODE_PRIVATE)
+        if (sent.getBoolean(notificationKey, false)) return
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(priority)
             .setAutoCancel(true)
-            .build()
-        
-        notificationManager.notify(id, notification)
+
+        if (airportCoords != null) {
+            val mapsIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("google.navigation:q=${airportCoords.first},${airportCoords.second}&mode=d")
+            )
+            val mapsPendingIntent = PendingIntent.getActivity(
+                this,
+                id + 100,
+                mapsIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(0, "Check live traffic", mapsPendingIntent)
+        }
+        flight?.flightNumber?.takeIf { it.isNotBlank() }?.let { number ->
+            val statusIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://www.google.com/search?q=${Uri.encode("$number flight status")}")
+            )
+            val statusPendingIntent = PendingIntent.getActivity(
+                this,
+                id + 200,
+                statusIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(0, "Check airline status", statusPendingIntent)
+        }
+
+        notificationManager.notify(id, builder.build())
+        sent.edit().putBoolean(notificationKey, true).apply()
     }
     
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

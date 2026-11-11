@@ -5,6 +5,7 @@ import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.local.dao.UserSettingsDao
 import com.roamatlas.data.local.entity.UserSettingsEntity
 import com.roamatlas.domain.model.CountryVisitStats
+import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.domain.model.YearlyTravelStats
 import kotlinx.coroutines.flow.Flow
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.mapLatest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,7 +59,9 @@ class TravelStatisticsRepository @Inject constructor(
         val totalFlightDuration = flightDao.getTotalFlightDuration() ?: 0
         val longestFlight = flightDao.getLongestFlight()
         
+        val flights = flightDao.getAllFlights().first().sortedBy { it.departureTimeMillis }
         val countryStats = countrySummaries.map { summary ->
+            val classification = classifyCountry(summary.countryCode, summary.daysSpent, flights)
             CountryVisitStats(
                 countryCode = summary.countryCode,
                 countryName = summary.countryName ?: getCountryName(summary.countryCode),
@@ -66,10 +70,14 @@ class TravelStatisticsRepository @Inject constructor(
                 firstVisit = Instant.ofEpochMilli(summary.firstTimestamp)
                     .atZone(ZoneId.systemDefault()).toLocalDate(),
                 lastVisit = Instant.ofEpochMilli(summary.lastTimestamp)
-                    .atZone(ZoneId.systemDefault()).toLocalDate()
+                    .atZone(ZoneId.systemDefault()).toLocalDate(),
+                classification = classification.first,
+                classificationReason = classification.second
             )
         }
-        val mostVisited = countryStats.maxByOrNull { it.daysSpent }
+        val mostVisited = countryStats
+            .filter { it.classification != CountryVisitClassification.TRANSIT }
+            .maxByOrNull { it.daysSpent }
         
         val (daysInside, daysOutside) = if (homeCountryCode != null) {
             calculateDaysInsideOutside(homeCountryCode)
@@ -80,7 +88,9 @@ class TravelStatisticsRepository @Inject constructor(
         val yearlyStats = calculateYearlyStats()
         
         TravelStatistics(
-            totalCountriesVisited = countryStats.size,
+            totalCountriesVisited = countryStats.count {
+                it.classification != CountryVisitClassification.TRANSIT
+            },
             totalCitiesVisited = locationDao.countDistinctCities(),
             totalLocationsRecorded = locationCount,
             totalFlights = flightCount,
@@ -104,6 +114,46 @@ class TravelStatisticsRepository @Inject constructor(
             countriesVisitedList = countryStats,
             yearlyStats = yearlyStats
         )
+    }
+
+    private suspend fun classifyCountry(
+        countryCode: String,
+        daysSpent: Int,
+        flights: List<com.roamatlas.data.local.entity.FlightEntity>
+    ): Pair<CountryVisitClassification, String?> {
+        for (index in 0 until flights.lastIndex) {
+            val arriving = flights[index]
+            val onward = flights[index + 1]
+            val layoverMillis = onward.departureTimeMillis - arriving.arrivalTimeMillis
+            if (layoverMillis !in 0..TimeUnit.HOURS.toMillis(24)) continue
+            val arrivalCountry = arriving.arrivalCountryCode
+                ?: locationDao.getDominantCountryBetween(
+                    arriving.arrivalTimeMillis - TimeUnit.HOURS.toMillis(2),
+                    arriving.arrivalTimeMillis + TimeUnit.HOURS.toMillis(6)
+                )
+            val onwardCountry = onward.departureCountryCode
+                ?: locationDao.getDominantCountryBetween(
+                    onward.departureTimeMillis - TimeUnit.HOURS.toMillis(6),
+                    onward.departureTimeMillis + TimeUnit.HOURS.toMillis(2)
+                )
+            if (arrivalCountry != countryCode || onwardCountry != countryCode) continue
+
+            val hours = TimeUnit.MILLISECONDS.toHours(layoverMillis)
+            val sameAirport = arriving.arrivalAirportCode.equals(
+                onward.departureAirportCode,
+                ignoreCase = true
+            )
+            return when {
+                sameAirport && hours <= 12 && daysSpent <= 1 ->
+                    CountryVisitClassification.TRANSIT to
+                        "Connecting flight at ${arriving.arrivalAirportCode} after ${hours}h"
+                daysSpent <= 1 ->
+                    CountryVisitClassification.UNCERTAIN to
+                        "Possible ${hours}h connection; verify whether you entered the country"
+                else -> CountryVisitClassification.VISITED to null
+            }
+        }
+        return CountryVisitClassification.VISITED to null
     }
     
     private suspend fun calculateDaysInsideOutside(homeCountryCode: String): Pair<Int, Int> {
