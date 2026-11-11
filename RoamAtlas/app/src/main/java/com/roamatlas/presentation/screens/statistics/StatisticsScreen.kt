@@ -43,6 +43,7 @@ import com.roamatlas.domain.model.CountryVisitClassification
 @Composable
 fun StatisticsScreen(
     onOpenCountry: (String) -> Unit = {},
+    onOpenCities: () -> Unit = {},
     viewModel: StatisticsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -114,7 +115,8 @@ fun StatisticsScreen(
                         icon = Icons.Default.LocationCity,
                         value = statistics.totalCitiesVisited.toString(),
                         label = "Cities",
-                        subtitle = "explored"
+                        subtitle = "explored",
+                        onClick = onOpenCities
                     )
                 }
             }
@@ -195,10 +197,13 @@ private fun StatCard(
     icon: ImageVector,
     value: String,
     label: String,
-    subtitle: String
+    subtitle: String,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+        ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )

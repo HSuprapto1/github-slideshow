@@ -82,13 +82,14 @@ import java.time.format.DateTimeFormatter
 fun MapScreenV2(
     initialDate: LocalDate? = null,
     initialCountryCode: String? = null,
+    initialCity: String? = null,
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
 
-    LaunchedEffect(initialDate, initialCountryCode) {
-        initialDate?.let { viewModel.showLocalDate(it, initialCountryCode) }
+    LaunchedEffect(initialDate, initialCountryCode, initialCity) {
+        initialDate?.let { viewModel.showLocalDate(it, initialCountryCode, initialCity) }
     }
     
     val cameraPositionState = rememberCameraPositionState {
@@ -116,7 +117,9 @@ fun MapScreenV2(
                     Column {
                         Text(
                             initialDate?.let {
-                                if (initialCountryCode == null) {
+                                if (initialCity != null) {
+                                    "$initialCity track · $it"
+                                } else if (initialCountryCode == null) {
                                     "Track · $it"
                                 } else {
                                     "$initialCountryCode track · $it"

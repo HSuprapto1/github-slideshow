@@ -84,12 +84,14 @@ interface LocationDao {
             'unixepoch'
         ) = :localDate
           AND (:countryCode IS NULL OR countryCode = :countryCode)
+          AND (:city IS NULL OR city = :city)
         ORDER BY timestampMillis ASC
         LIMIT :limit
     """)
     fun getLocationsForLocalDate(
         localDate: String,
         countryCode: String?,
+        city: String?,
         limit: Int
     ): Flow<List<LocationEntity>>
 
@@ -153,6 +155,99 @@ interface LocationDao {
         ORDER BY date DESC
     """)
     suspend fun getCountryDailySummaries(countryCode: String): List<CountryDailySummary>
+
+    @Query("""
+        SELECT city,
+               countryCode,
+               MAX(countryName) AS countryName,
+               COUNT(*) AS pointCount,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS daysRecorded,
+               MIN(DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS firstDate,
+               MAX(DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS lastDate
+        FROM locations
+        WHERE city IS NOT NULL AND city != ''
+          AND countryCode IS NOT NULL
+        GROUP BY city, countryCode
+        ORDER BY daysRecorded DESC, pointCount DESC, city ASC
+    """)
+    suspend fun getCitySummaries(): List<CitySummary>
+
+    @Query("""
+        SELECT :city AS city,
+               :countryCode AS countryCode,
+               MAX(countryName) AS countryName,
+               COUNT(*) AS pointCount,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS daysRecorded,
+               MIN(DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS firstDate,
+               MAX(DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS lastDate
+        FROM locations
+        WHERE city = :city AND countryCode = :countryCode
+    """)
+    suspend fun getCityDetails(city: String, countryCode: String): CityDetailsSummary
+
+    @Query("""
+        SELECT strftime(
+                   '%Y',
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               ) AS year,
+               COUNT(*) AS pointCount,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS daysRecorded
+        FROM locations
+        WHERE city = :city AND countryCode = :countryCode
+        GROUP BY year
+        ORDER BY year DESC
+    """)
+    suspend fun getCityYearSummaries(
+        city: String,
+        countryCode: String
+    ): List<CityYearSummary>
+
+    @Query("""
+        SELECT DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               ) AS date,
+               COUNT(*) AS pointCount
+        FROM locations
+        WHERE city = :city AND countryCode = :countryCode
+        GROUP BY date
+        ORDER BY date DESC
+    """)
+    suspend fun getCityDailySummaries(
+        city: String,
+        countryCode: String
+    ): List<CityDailySummary>
 
     @Query("SELECT COUNT(DISTINCT city) FROM locations WHERE city IS NOT NULL AND city != ''")
     suspend fun countDistinctCities(): Int
@@ -355,4 +450,35 @@ data class CountryDailySummary(
     val date: String,
     val pointCount: Int,
     val cities: String?
+)
+
+data class CitySummary(
+    val city: String,
+    val countryCode: String,
+    val countryName: String?,
+    val pointCount: Int,
+    val daysRecorded: Int,
+    val firstDate: String?,
+    val lastDate: String?
+)
+
+data class CityDetailsSummary(
+    val city: String,
+    val countryCode: String,
+    val countryName: String?,
+    val pointCount: Int,
+    val daysRecorded: Int,
+    val firstDate: String?,
+    val lastDate: String?
+)
+
+data class CityYearSummary(
+    val year: String,
+    val pointCount: Int,
+    val daysRecorded: Int
+)
+
+data class CityDailySummary(
+    val date: String,
+    val pointCount: Int
 )

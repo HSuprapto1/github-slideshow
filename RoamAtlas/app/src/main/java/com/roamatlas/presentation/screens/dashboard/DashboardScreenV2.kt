@@ -69,6 +69,7 @@ import java.util.Locale
 fun DashboardScreenV2(
     onSelectHomeCountry: () -> Unit = {},
     onOpenCountry: (String) -> Unit = {},
+    onOpenCities: () -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -130,7 +131,7 @@ fun DashboardScreenV2(
                 }
 
                 item {
-                    TravelOverviewSection(uiState.travelStats)
+                    TravelOverviewSection(uiState.travelStats, onOpenCities)
                 }
                 
                 item {
@@ -333,7 +334,10 @@ private fun GetStartedItem(number: String, text: String) {
 }
 
 @Composable
-private fun TravelOverviewSection(stats: TravelStatistics) {
+private fun TravelOverviewSection(
+    stats: TravelStatistics,
+    onOpenCities: () -> Unit
+) {
     Column {
         Text(
             text = "Travel Overview",
@@ -359,7 +363,8 @@ private fun TravelOverviewSection(stats: TravelStatistics) {
                 icon = Icons.Default.LocationCity,
                 value = stats.totalCitiesVisited.toString(),
                 label = "Cities",
-                color = MaterialTheme.colorScheme.secondary
+                color = MaterialTheme.colorScheme.secondary,
+                onClick = onOpenCities
             )
             StatCard(
                 modifier = Modifier.weight(1f),
@@ -829,10 +834,13 @@ private fun StatCard(
     icon: ImageVector,
     value: String,
     label: String,
-    color: Color
+    color: Color,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+        ),
         colors = CardDefaults.cardColors(
             containerColor = color.copy(alpha = 0.15f)
         )

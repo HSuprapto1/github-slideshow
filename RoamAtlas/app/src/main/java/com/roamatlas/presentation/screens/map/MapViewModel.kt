@@ -106,7 +106,11 @@ class MapViewModel @Inject constructor(
         loadLocations()
     }
 
-    fun showLocalDate(date: LocalDate, countryCode: String? = null) {
+    fun showLocalDate(
+        date: LocalDate,
+        countryCode: String? = null,
+        city: String? = null
+    ) {
         locationsJob?.cancel()
         _uiState.value = _uiState.value.copy(
             filterStartDate = date,
@@ -118,6 +122,7 @@ class MapViewModel @Inject constructor(
             locationRepository.getLocationsForLocalDate(
                 localDate = date,
                 countryCode = countryCode,
+                city = city,
                 limit = MAX_MAP_POINTS
             )
                 .collect { locations ->

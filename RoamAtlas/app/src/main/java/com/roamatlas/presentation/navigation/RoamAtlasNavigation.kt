@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.navigation
 
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -34,9 +35,12 @@ sealed class Screen(
     ) {
         const val DAY_ROUTE = "map/day/{date}"
         const val DAY_COUNTRY_ROUTE = "map/day/{date}/{country}"
+        const val DAY_CITY_ROUTE = "map/day/{date}/{country}/city/{city}"
         fun forDate(date: String) = "map/day/$date"
         fun forCountryDate(date: String, countryCode: String) =
             "map/day/$date/${countryCode.uppercase()}"
+        fun forCityDate(date: String, countryCode: String, city: String) =
+            "map/day/$date/${countryCode.uppercase()}/city/${Uri.encode(city)}"
     }
 
     data object Days : Screen(
@@ -115,6 +119,19 @@ sealed class Screen(
         title = "Country History"
     ) {
         fun forCode(countryCode: String) = "country/${countryCode.uppercase()}"
+    }
+
+    data object Cities : Screen(
+        route = "cities",
+        title = "Cities Explored"
+    )
+
+    data object CityDetail : Screen(
+        route = "city/{country}/{city}",
+        title = "City History"
+    ) {
+        fun forCity(countryCode: String, city: String) =
+            "city/${countryCode.uppercase()}/${Uri.encode(city)}"
     }
 }
 

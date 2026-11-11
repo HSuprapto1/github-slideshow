@@ -25,6 +25,8 @@ import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
 import com.roamatlas.presentation.screens.country.CountryDetailScreen
+import com.roamatlas.presentation.screens.city.CitiesScreen
+import com.roamatlas.presentation.screens.city.CityDetailScreen
 import com.roamatlas.presentation.screens.days.DayAuditScreen
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
@@ -130,6 +132,9 @@ fun RoamAtlasApp(
                         },
                         onOpenCountry = { countryCode ->
                             navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        },
+                        onOpenCities = {
+                            navController.navigate(Screen.Cities.route)
                         }
                     )
                 }
@@ -145,6 +150,16 @@ fun RoamAtlasApp(
                     val country = entry.arguments?.getString("country")
                     MapScreenV2(initialDate = date, initialCountryCode = country)
                 }
+                composable(Screen.Map.DAY_CITY_ROUTE) { entry ->
+                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                    val country = entry.arguments?.getString("country")
+                    val city = entry.arguments?.getString("city")
+                    MapScreenV2(
+                        initialDate = date,
+                        initialCountryCode = country,
+                        initialCity = city
+                    )
+                }
                 composable(Screen.Days.route) {
                     DayAuditScreen(
                         onOpenMap = { date ->
@@ -156,6 +171,9 @@ fun RoamAtlasApp(
                     StatisticsScreen(
                         onOpenCountry = { countryCode ->
                             navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        },
+                        onOpenCities = {
+                            navController.navigate(Screen.Cities.route)
                         }
                     )
                 }
@@ -254,6 +272,30 @@ fun RoamAtlasApp(
                         onOpenMap = { date, countryCode ->
                             navController.navigate(
                                 Screen.Map.forCountryDate(date.toString(), countryCode)
+                            )
+                        }
+                    )
+                }
+                composable(Screen.Cities.route) {
+                    CitiesScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenCity = { city ->
+                            navController.navigate(
+                                Screen.CityDetail.forCity(city.countryCode, city.city)
+                            )
+                        }
+                    )
+                }
+                composable(Screen.CityDetail.route) {
+                    CityDetailScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode, city ->
+                            navController.navigate(
+                                Screen.Map.forCityDate(
+                                    date.toString(),
+                                    countryCode,
+                                    city
+                                )
                             )
                         }
                     )
