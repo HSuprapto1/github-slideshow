@@ -3,6 +3,8 @@ package com.roamatlas.presentation.screens.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.repository.TravelStatisticsRepository
+import com.roamatlas.data.repository.DayOverrideRepository
+import com.roamatlas.data.repository.ManualDayClassification
 import com.roamatlas.domain.model.CountingMode
 import com.roamatlas.domain.model.DayTracker
 import com.roamatlas.domain.model.TravelStatistics
@@ -40,7 +42,8 @@ data class DashboardUiStateV2(
 class DashboardViewModelV2 @Inject constructor(
     private val locationRepository: LocationRepository,
     private val dayTrackerRepository: DayTrackerRepository,
-    private val travelStatisticsRepository: TravelStatisticsRepository
+    private val travelStatisticsRepository: TravelStatisticsRepository,
+    private val dayOverrideRepository: DayOverrideRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(DashboardUiStateV2())
@@ -95,11 +98,20 @@ class DashboardViewModelV2 @Inject constructor(
             val resultDays = if (tracker.countInsideCountry) {
                 daysCount
             } else {
-                locationRepository.countDaysOutsideCountry(
+                val evidenceDates = locationRepository.getDaysOutsideCountry(
                     tracker.countryCode,
                     startMillis,
                     endMillis
                 )
+                val zone = java.time.ZoneId.systemDefault()
+                val startDate = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
+                val endDate = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
+                val manualDates = dayOverrideRepository.getOverrides(tracker.countryCode)
+                    .filter { (date, classification) ->
+                        classification == ManualDayClassification.OUTSIDE &&
+                            date in startDate..endDate
+                    }.keys
+                (evidenceDates + manualDates).size
             }
             
             TrackerResult(

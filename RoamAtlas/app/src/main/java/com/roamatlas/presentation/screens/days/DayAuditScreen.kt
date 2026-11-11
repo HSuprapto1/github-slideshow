@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.roamatlas.data.repository.ManualDayClassification
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -81,7 +82,7 @@ fun DayAuditScreen(
         ) {
             item {
                 Text(
-                    "Check the evidence behind every total. A date can contain more than one country on a travel day.",
+                    "Departure and return dates count as outside when any recorded point is outside the selected country. A travel day can therefore show both inside and outside evidence.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -174,7 +175,13 @@ fun DayAuditScreen(
                 }
             } else {
                 items(state.days, key = { it.date.toEpochDay() }) { day ->
-                    DayEvidenceCard(day)
+                    DayEvidenceCard(
+                        day = day,
+                        selectedCountryCode = state.selectedCountryCode,
+                        selectedCountryName = state.selectedCountryName,
+                        onMarkOutside = { viewModel.markDayOutside(day.date) },
+                        onRemoveOverride = { viewModel.removeDayOverride(day.date) }
+                    )
                 }
             }
             state.errorMessage?.let { error ->
@@ -254,7 +261,16 @@ private fun SummaryCard(value: String, label: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun DayEvidenceCard(day: AuditedDay) {
+private fun DayEvidenceCard(
+    day: AuditedDay,
+    selectedCountryCode: String,
+    selectedCountryName: String,
+    onMarkOutside: () -> Unit,
+    onRemoveOverride: () -> Unit
+) {
+    val hasConfirmedOutside = day.evidence.any {
+        it.countryCode != null && it.countryCode != selectedCountryCode
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -275,6 +291,40 @@ private fun DayEvidenceCard(day: AuditedDay) {
                         "$country · ${record.pointCount} recorded points",
                         style = MaterialTheme.typography.bodyMedium
                     )
+                }
+            }
+            when {
+                day.manualClassification == ManualDayClassification.OUTSIDE -> {
+                    Text(
+                        "User confirmed: count as outside $selectedCountryName",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    TextButton(onClick = onRemoveOverride) {
+                        Text("Undo decision")
+                    }
+                }
+                !hasConfirmedOutside && day.evidence.any { it.countryCode == null } -> {
+                    Text(
+                        "The recorded point is outside known country land polygons. It may be offshore.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    OutlinedButton(
+                        onClick = onMarkOutside,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Count this date as outside")
+                    }
+                }
+                !hasConfirmedOutside && !day.hasRecordedPoint -> {
+                    OutlinedButton(
+                        onClick = onMarkOutside,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("I was outside — count this date")
+                    }
                 }
             }
         }

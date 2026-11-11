@@ -2,6 +2,7 @@ package com.roamatlas.domain.repository
 
 import com.roamatlas.domain.model.LocationRecord
 import kotlinx.coroutines.flow.Flow
+import java.time.LocalDate
 
 data class DailyCountryRecord(
     val date: String,
@@ -35,6 +36,11 @@ interface LocationRepository {
     suspend fun deleteAllLocations()
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
     suspend fun countDaysOutsideCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
+    suspend fun getDaysOutsideCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Set<LocalDate>
     suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int
     suspend fun getDailyCountryEvidence(
         startMillis: Long,

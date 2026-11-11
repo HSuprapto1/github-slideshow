@@ -195,6 +195,22 @@ interface LocationDao {
     ): Int
 
     @Query("""
+        SELECT DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        )
+        FROM locations
+        WHERE countryCode IS NOT NULL
+          AND countryCode != :countryCode
+          AND timestampMillis BETWEEN :startMillis AND :endMillis
+    """)
+    suspend fun getDaysOutsideCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): List<String>
+
+    @Query("""
         SELECT DATE(
                    (timestampMillis / 1000) +
                    (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),

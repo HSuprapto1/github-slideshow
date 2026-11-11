@@ -8,6 +8,7 @@ import com.roamatlas.domain.repository.DailyCountryRecord
 import com.roamatlas.domain.repository.LocationRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -99,6 +100,14 @@ class LocationRepositoryImpl @Inject constructor(
         startMillis: Long,
         endMillis: Long
     ): Int = locationDao.countDaysOutsideCountry(countryCode, startMillis, endMillis)
+
+    override suspend fun getDaysOutsideCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Set<LocalDate> = locationDao.getDaysOutsideCountry(countryCode, startMillis, endMillis)
+        .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+        .toSet()
 
     override suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int {
         return locationDao.countTrackedDaysBetween(startMillis, endMillis)

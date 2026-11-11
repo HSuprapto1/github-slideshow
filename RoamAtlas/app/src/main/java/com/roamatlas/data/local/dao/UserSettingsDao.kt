@@ -28,6 +28,9 @@ interface UserSettingsDao {
     @Query("SELECT * FROM user_settings")
     suspend fun getAllSettingsSnapshot(): List<UserSettingsEntity>
 
+    @Query("SELECT * FROM user_settings WHERE `key` LIKE :prefix || '%'")
+    suspend fun getSettingsWithPrefix(prefix: String): List<UserSettingsEntity>
+
     @Query("DELETE FROM user_settings")
     suspend fun deleteAll()
     

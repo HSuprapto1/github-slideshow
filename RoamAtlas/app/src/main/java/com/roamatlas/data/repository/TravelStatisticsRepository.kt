@@ -23,7 +23,8 @@ import javax.inject.Singleton
 class TravelStatisticsRepository @Inject constructor(
     private val locationDao: LocationDao,
     private val flightDao: FlightDao,
-    private val userSettingsDao: UserSettingsDao
+    private val userSettingsDao: UserSettingsDao,
+    private val dayOverrideRepository: DayOverrideRepository
 ) {
     
     suspend fun getHomeCountryCode(): String? {
@@ -161,7 +162,19 @@ class TravelStatisticsRepository @Inject constructor(
         val earliest = locationDao.getEarliestTimestamp() ?: return Pair(0, 0)
         val latest = locationDao.getLatestTimestamp() ?: return Pair(0, 0)
         val daysInHome = locationDao.countDaysInCountry(homeCountryCode, earliest, latest)
-        val daysOutside = locationDao.countDaysOutsideCountry(homeCountryCode, earliest, latest)
+        val evidenceDates = locationDao.getDaysOutsideCountry(homeCountryCode, earliest, latest)
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+            .toSet()
+        val firstDate = Instant.ofEpochMilli(earliest)
+            .atZone(ZoneId.systemDefault()).toLocalDate()
+        val lastDate = Instant.ofEpochMilli(latest)
+            .atZone(ZoneId.systemDefault()).toLocalDate()
+        val confirmedDates = dayOverrideRepository.getOverrides(homeCountryCode)
+            .filter { (date, classification) ->
+                classification == ManualDayClassification.OUTSIDE &&
+                    date in firstDate..lastDate
+            }.keys
+        val daysOutside = (evidenceDates + confirmedDates).size
         
         return Pair(daysInHome, daysOutside)
     }

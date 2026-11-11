@@ -3,6 +3,8 @@ package com.roamatlas.presentation.screens.days
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.repository.TravelStatisticsRepository
+import com.roamatlas.data.repository.DayOverrideRepository
+import com.roamatlas.data.repository.ManualDayClassification
 import com.roamatlas.domain.model.CountingMode
 import com.roamatlas.domain.model.DayTracker
 import com.roamatlas.domain.repository.DailyCountryRecord
@@ -21,7 +23,8 @@ import javax.inject.Inject
 
 data class AuditedDay(
     val date: LocalDate,
-    val evidence: List<DailyCountryRecord>
+    val evidence: List<DailyCountryRecord>,
+    val manualClassification: ManualDayClassification? = null
 ) {
     val hasRecordedPoint: Boolean get() = evidence.isNotEmpty()
     val hasKnownCountry: Boolean get() = evidence.any { it.countryCode != null }
@@ -48,7 +51,8 @@ data class DayAuditUiState(
 class DayAuditViewModel @Inject constructor(
     private val locationRepository: LocationRepository,
     private val dayTrackerRepository: DayTrackerRepository,
-    private val travelStatisticsRepository: TravelStatisticsRepository
+    private val travelStatisticsRepository: TravelStatisticsRepository,
+    private val dayOverrideRepository: DayOverrideRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DayAuditUiState())
     val uiState: StateFlow<DayAuditUiState> = _uiState.asStateFlow()
@@ -90,11 +94,31 @@ class DayAuditViewModel @Inject constructor(
             selectedCountryName = name,
             savedMessage = null
         )
-        calculateSummary()
+        loadEvidence()
     }
 
     fun setCountInside(countInside: Boolean) {
         _uiState.value = _uiState.value.copy(countInsideCountry = countInside)
+    }
+
+    fun markDayOutside(date: LocalDate) {
+        val countryCode = _uiState.value.selectedCountryCode
+        viewModelScope.launch {
+            dayOverrideRepository.setOverride(
+                countryCode,
+                date,
+                ManualDayClassification.OUTSIDE
+            )
+            loadEvidence()
+        }
+    }
+
+    fun removeDayOverride(date: LocalDate) {
+        val countryCode = _uiState.value.selectedCountryCode
+        viewModelScope.launch {
+            dayOverrideRepository.removeOverride(countryCode, date)
+            loadEvidence()
+        }
     }
 
     fun saveRangeAsCounter() {
@@ -133,10 +157,15 @@ class DayAuditViewModel @Inject constructor(
                     .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() - 1
                 val evidence = locationRepository.getDailyCountryEvidence(queryStart, queryEnd)
                     .groupBy { LocalDate.parse(it.date) }
+                val overrides = dayOverrideRepository.getOverrides(state.selectedCountryCode)
                 val days = generateSequence(state.startDate) { current ->
                     current.plusDays(1).takeIf { it <= state.endDate }
                 }.map { date ->
-                    AuditedDay(date, evidence[date].orEmpty())
+                    AuditedDay(
+                        date = date,
+                        evidence = evidence[date].orEmpty(),
+                        manualClassification = overrides[date]
+                    )
                 }.toList()
                 _uiState.value = _uiState.value.copy(days = days, isLoading = false)
                 calculateSummary()
@@ -153,11 +182,19 @@ class DayAuditViewModel @Inject constructor(
     private fun calculateSummary() {
         val state = _uiState.value
         val inside = state.days.count { day ->
-            day.evidence.any { it.countryCode == state.selectedCountryCode }
+            when (day.manualClassification) {
+                ManualDayClassification.INSIDE -> true
+                ManualDayClassification.OUTSIDE -> false
+                null -> day.evidence.any { it.countryCode == state.selectedCountryCode }
+            }
         }
         val outside = state.days.count { day ->
-            day.evidence.any {
-                it.countryCode != null && it.countryCode != state.selectedCountryCode
+            when (day.manualClassification) {
+                ManualDayClassification.OUTSIDE -> true
+                ManualDayClassification.INSIDE -> false
+                null -> day.evidence.any {
+                    it.countryCode != null && it.countryCode != state.selectedCountryCode
+                }
             }
         }
         val unknown = state.days.count { day ->
