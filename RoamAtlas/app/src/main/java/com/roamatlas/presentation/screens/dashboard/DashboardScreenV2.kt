@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -62,6 +63,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreenV2(
+    onSelectHomeCountry: () -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -77,11 +79,13 @@ fun DashboardScreenV2(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { viewModel.showAddTrackerDialog() },
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Custom Tracker")
+            if (uiState.hasData) {
+                FloatingActionButton(
+                    onClick = { viewModel.showAddTrackerDialog() },
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add day counter")
+                }
             }
         }
     ) { paddingValues ->
@@ -105,6 +109,21 @@ fun DashboardScreenV2(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (uiState.errorMessage != null) {
+                    item {
+                        Text(
+                            text = uiState.errorMessage!!,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+
+                if (uiState.homeCountryCode == null) {
+                    item {
+                        HomeCountryPrompt(onSelectHomeCountry)
+                    }
+                }
+
                 item {
                     TravelOverviewSection(uiState.travelStats)
                 }
@@ -149,84 +168,106 @@ fun DashboardScreenV2(
             }
         }
     }
+
+    if (uiState.showAddTrackerDialog) {
+        AddTrackerDialog(
+            countries = uiState.countries,
+            defaultCountryCode = uiState.homeCountryCode,
+            historyStart = uiState.travelStats.earliestRecordDate,
+            historyEnd = uiState.travelStats.latestRecordDate,
+            onDismiss = viewModel::hideAddTrackerDialog,
+            onAdd = viewModel::addTracker
+        )
+    }
 }
 
 @Composable
 private fun EmptyStateScreen(modifier: Modifier = Modifier) {
-    Column(
+    LazyColumn(
         modifier = modifier
-            .fillMaxSize()
-            .padding(32.dp),
+            .fillMaxSize(),
+        contentPadding = PaddingValues(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Icon(
-            imageVector = Icons.Default.TravelExplore,
-            contentDescription = null,
-            modifier = Modifier.size(120.dp),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Text(
-            text = "Welcome to RoamAtlas",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = "Your personal travel history companion",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        item {
+            Icon(
+                imageVector = Icons.Default.TravelExplore,
+                contentDescription = null,
+                modifier = Modifier.size(100.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
             )
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp)
+        }
+        item {
+            Text(
+                text = "Welcome to RoamAtlas",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
+        item {
+            Text(
+                text = "Your personal travel history companion",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                )
             ) {
-                Text(
-                    text = "Get Started",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                GetStartedItem(
-                    number = "1",
-                    text = "Import your Google Timeline from Settings"
-                )
-                GetStartedItem(
-                    number = "2",
-                    text = "Or enable GPS tracking to record new locations"
-                )
-                GetStartedItem(
-                    number = "3",
-                    text = "Add flights manually or import from Gmail"
-                )
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Get Started",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    GetStartedItem("1", "Import your Google Timeline from Settings")
+                    GetStartedItem("2", "Or enable GPS tracking to record new locations")
+                    GetStartedItem("3", "Add flights manually or import from Gmail")
+                }
             }
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            text = "Go to Settings to import your data",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Medium
+        item {
+            Text(
+                text = "Go to Settings to import your data",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeCountryPrompt(onSelectHomeCountry: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
         )
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = "Choose your home country",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "RoamAtlas needs this to show days at home and days abroad.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            Button(onClick = onSelectHomeCountry) {
+                Text("Select home country")
+            }
+        }
     }
 }
 
@@ -629,7 +670,11 @@ private fun CustomTrackerCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = result.tracker.countryName,
+                        text = if (result.tracker.countInsideCountry) {
+                            "Inside ${result.tracker.countryName}"
+                        } else {
+                            "Outside ${result.tracker.countryName}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )

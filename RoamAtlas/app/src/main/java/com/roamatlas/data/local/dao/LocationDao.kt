@@ -84,6 +84,13 @@ interface LocationDao {
     suspend fun countTrackedDays(): Int
 
     @Query("""
+        SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch'))
+        FROM locations
+        WHERE timestampMillis BETWEEN :startMillis AND :endMillis
+    """)
+    suspend fun countTrackedDaysBetween(startMillis: Long, endMillis: Long): Int
+
+    @Query("""
         SELECT countryCode, countryName, COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS daysSpent,
                COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS visitCount,
                MIN(timestampMillis) AS firstTimestamp, MAX(timestampMillis) AS lastTimestamp
@@ -137,6 +144,19 @@ interface LocationDao {
     
     @Query("SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) FROM locations WHERE countryCode = :countryCode AND timestampMillis BETWEEN :startMillis AND :endMillis")
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
+
+    @Query("""
+        SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch'))
+        FROM locations
+        WHERE countryCode IS NOT NULL
+          AND countryCode != :countryCode
+          AND timestampMillis BETWEEN :startMillis AND :endMillis
+    """)
+    suspend fun countDaysOutsideCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Int
 }
 
 data class DayCountryResult(

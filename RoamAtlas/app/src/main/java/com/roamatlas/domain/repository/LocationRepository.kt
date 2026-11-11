@@ -27,5 +27,7 @@ interface LocationRepository {
     suspend fun deleteLocation(location: LocationRecord)
     suspend fun deleteAllLocations()
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
+    suspend fun countDaysOutsideCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
+    suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int
     suspend fun isDuplicate(originalSourceId: String): Boolean
 }

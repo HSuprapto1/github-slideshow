@@ -84,6 +84,7 @@ class TravelStatisticsRepository @Inject constructor(
         } else {
             Pair(0, 0)
         }
+        val totalTrackedDays = locationDao.countTrackedDays()
         
         val yearlyStats = calculateYearlyStats()
         
@@ -104,7 +105,7 @@ class TravelStatisticsRepository @Inject constructor(
             mostVisitedCountryDays = mostVisited?.daysSpent ?: 0,
             daysOutsideHomeCountry = daysOutside,
             daysInsideHomeCountry = daysInside,
-            totalDaysTracked = daysInside + daysOutside,
+            totalDaysTracked = totalTrackedDays,
             earliestRecordDate = earliestTimestamp?.let {
                 Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
             },
@@ -160,10 +161,9 @@ class TravelStatisticsRepository @Inject constructor(
         val earliest = locationDao.getEarliestTimestamp() ?: return Pair(0, 0)
         val latest = locationDao.getLatestTimestamp() ?: return Pair(0, 0)
         val daysInHome = locationDao.countDaysInCountry(homeCountryCode, earliest, latest)
-        val totalTrackedDays = locationDao.countTrackedDays()
-        val daysOutside = totalTrackedDays - daysInHome
+        val daysOutside = locationDao.countDaysOutsideCountry(homeCountryCode, earliest, latest)
         
-        return Pair(daysInHome, maxOf(0, daysOutside))
+        return Pair(daysInHome, daysOutside)
     }
     
     private suspend fun calculateYearlyStats(): List<YearlyTravelStats> {

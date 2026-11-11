@@ -92,6 +92,16 @@ class LocationRepositoryImpl @Inject constructor(
     override suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int {
         return locationDao.countDaysInCountry(countryCode, startMillis, endMillis)
     }
+
+    override suspend fun countDaysOutsideCountry(
+        countryCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Int = locationDao.countDaysOutsideCountry(countryCode, startMillis, endMillis)
+
+    override suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int {
+        return locationDao.countTrackedDaysBetween(startMillis, endMillis)
+    }
     
     override suspend fun isDuplicate(originalSourceId: String): Boolean {
         return locationDao.getByOriginalSourceId(originalSourceId) != null

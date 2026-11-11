@@ -114,7 +114,11 @@ fun RoamAtlasApp(
                 modifier = Modifier.weight(1f)
             ) {
                 composable(Screen.Dashboard.route) {
-                    DashboardScreenV2()
+                    DashboardScreenV2(
+                        onSelectHomeCountry = {
+                            navController.navigate(Screen.HomeCountry.route)
+                        }
+                    )
                 }
                 composable(Screen.Map.route) {
                     MapScreenV2()

@@ -3,7 +3,7 @@ package com.roamatlas.presentation.screens.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.repository.TravelStatisticsRepository
-import com.roamatlas.domain.model.CountryVisitStats
+import com.roamatlas.domain.model.CountingMode
 import com.roamatlas.domain.model.DayTracker
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.domain.model.TrackerResult
@@ -13,10 +13,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
 data class DashboardUiStateV2(
@@ -26,7 +29,9 @@ data class DashboardUiStateV2(
     val homeCountryName: String? = null,
     val isLoading: Boolean = true,
     val hasData: Boolean = false,
-    val showAddTrackerDialog: Boolean = false
+    val showAddTrackerDialog: Boolean = false,
+    val countries: List<Pair<String, String>> = emptyList(),
+    val errorMessage: String? = null
 )
 
 @HiltViewModel
@@ -45,34 +50,33 @@ class DashboardViewModelV2 @Inject constructor(
     
     private fun loadDashboardData() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            
-            val locationCount = locationRepository.getLocationCount().first()
-            val homeCountryCode = travelStatisticsRepository.getHomeCountryCode()
-            
-            if (locationCount == 0) {
-                // No data yet - show empty state (no demo data)
-                _uiState.value = DashboardUiStateV2(
-                    travelStats = TravelStatistics(),
-                    customTrackers = emptyList(),
-                    homeCountryCode = homeCountryCode,
-                    isLoading = false,
-                    hasData = false
-                )
-            } else {
-                // Real data from user's imported locations
-                travelStatisticsRepository.getTravelStatistics().collect { stats ->
-                    val trackers = dayTrackerRepository.getAllTrackers().first()
+            try {
+                combine(
+                    travelStatisticsRepository.getTravelStatistics(),
+                    dayTrackerRepository.getAllTrackers(),
+                    travelStatisticsRepository.getHomeCountryCodeFlow()
+                ) { stats, trackers, homeCountryCode ->
+                    Triple(stats, trackers, homeCountryCode)
+                }.collectLatest { (stats, trackers, homeCountryCode) ->
                     val trackerResults = calculateTrackerResults(trackers)
-                    
-                    _uiState.value = DashboardUiStateV2(
+                    val countries = TravelStatisticsRepository.getAllCountries()
+                    _uiState.value = _uiState.value.copy(
                         travelStats = stats,
                         customTrackers = trackerResults,
                         homeCountryCode = homeCountryCode,
+                        homeCountryName = countries.firstOrNull { it.first == homeCountryCode }?.second,
                         isLoading = false,
-                        hasData = true
+                        hasData = stats.totalLocationsRecorded > 0,
+                        countries = countries,
+                        errorMessage = null
                     )
                 }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = error.message ?: "Dashboard could not be loaded."
+                )
             }
         }
     }
@@ -85,16 +89,29 @@ class DashboardViewModelV2 @Inject constructor(
                 startMillis,
                 endMillis
             )
+            val trackedDays = locationRepository.countTrackedDays(startMillis, endMillis)
+            val resultDays = if (tracker.countInsideCountry) {
+                daysCount
+            } else {
+                locationRepository.countDaysOutsideCountry(
+                    tracker.countryCode,
+                    startMillis,
+                    endMillis
+                )
+            }
             
             TrackerResult(
                 tracker = tracker,
-                totalDays = daysCount,
-                verifiedDays = daysCount,
+                totalDays = resultDays,
+                verifiedDays = resultDays,
                 uncertainDays = 0,
-                missingDays = 0,
+                missingDays = (calculateDaysInRange(startMillis, endMillis) - trackedDays)
+                    .coerceAtLeast(0),
                 daysInRange = calculateDaysInRange(startMillis, endMillis),
-                percentageComplete = if (daysCount > 0) 100f else 0f,
-                thresholdExceeded = tracker.thresholdDays?.let { daysCount >= it },
+                percentageComplete = if (trackedDays > 0) {
+                    resultDays.toFloat() / trackedDays * 100f
+                } else 0f,
+                thresholdExceeded = tracker.thresholdDays?.let { resultDays >= it },
                 lastCalculated = Instant.now()
             )
         }
@@ -127,7 +144,10 @@ class DashboardViewModelV2 @Inject constructor(
     }
     
     private fun calculateDaysInRange(startMillis: Long, endMillis: Long): Int {
-        return ((endMillis - startMillis) / (24 * 60 * 60 * 1000)).toInt() + 1
+        val zone = java.time.ZoneId.systemDefault()
+        val start = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
+        val end = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
+        return ChronoUnit.DAYS.between(start, end).toInt() + 1
     }
     
     private fun LocalDate.toEpochMilli(): Long {
@@ -137,7 +157,7 @@ class DashboardViewModelV2 @Inject constructor(
     private fun LocalDate.inclusiveEndMillis(): Long = plusDays(1).toEpochMilli() - 1
     
     fun refresh() {
-        loadDashboardData()
+        // Room flows refresh this screen automatically after imports and setting changes.
     }
     
     fun showAddTrackerDialog() {
@@ -146,5 +166,37 @@ class DashboardViewModelV2 @Inject constructor(
     
     fun hideAddTrackerDialog() {
         _uiState.value = _uiState.value.copy(showAddTrackerDialog = false)
+    }
+
+    fun addTracker(
+        name: String,
+        countryCode: String,
+        countryName: String,
+        countingMode: CountingMode,
+        countInsideCountry: Boolean,
+        startDate: LocalDate? = null,
+        endDate: LocalDate? = null,
+        year: Int? = null,
+        thresholdDays: Int? = null
+    ) {
+        viewModelScope.launch {
+            dayTrackerRepository.insertTracker(
+                DayTracker(
+                    name = name.ifBlank {
+                        if (countInsideCountry) "Days in $countryName" else "Days outside $countryName"
+                    },
+                    countryCode = countryCode,
+                    countryName = countryName,
+                    countingMode = countingMode,
+                    startDate = startDate,
+                    endDate = endDate,
+                    year = year,
+                    thresholdDays = thresholdDays,
+                    countInsideCountry = countInsideCountry,
+                    displayOrder = dayTrackerRepository.getNextDisplayOrder()
+                )
+            )
+            hideAddTrackerDialog()
+        }
     }
 }
