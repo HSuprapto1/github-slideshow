@@ -4,6 +4,7 @@ import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.local.toDomain
 import com.roamatlas.data.local.toEntity
 import com.roamatlas.domain.model.LocationRecord
+import com.roamatlas.domain.repository.DailyCountryRecord
 import com.roamatlas.domain.repository.LocationRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -102,6 +103,19 @@ class LocationRepositoryImpl @Inject constructor(
     override suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int {
         return locationDao.countTrackedDaysBetween(startMillis, endMillis)
     }
+
+    override suspend fun getDailyCountryEvidence(
+        startMillis: Long,
+        endMillis: Long
+    ): List<DailyCountryRecord> =
+        locationDao.getDailyCountryEvidence(startMillis, endMillis).map {
+            DailyCountryRecord(
+                date = it.date,
+                countryCode = it.countryCode,
+                countryName = it.countryName,
+                pointCount = it.pointCount
+            )
+        }
     
     override suspend fun isDuplicate(originalSourceId: String): Boolean {
         return locationDao.getByOriginalSourceId(originalSourceId) != null

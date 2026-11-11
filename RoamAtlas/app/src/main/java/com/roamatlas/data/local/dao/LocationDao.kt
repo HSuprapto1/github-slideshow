@@ -193,6 +193,25 @@ interface LocationDao {
         startMillis: Long,
         endMillis: Long
     ): Int
+
+    @Query("""
+        SELECT DATE(
+                   (timestampMillis / 1000) +
+                   (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               ) AS date,
+               countryCode,
+               MAX(countryName) AS countryName,
+               COUNT(*) AS pointCount
+        FROM locations
+        WHERE timestampMillis BETWEEN :startMillis AND :endMillis
+        GROUP BY date, countryCode
+        ORDER BY date ASC, pointCount DESC
+    """)
+    suspend fun getDailyCountryEvidence(
+        startMillis: Long,
+        endMillis: Long
+    ): List<DailyCountryEvidence>
 }
 
 data class DayCountryResult(
@@ -213,4 +232,11 @@ data class YearlyLocationSummary(
     val year: String,
     val daysTracked: Int,
     val countriesVisited: Int
+)
+
+data class DailyCountryEvidence(
+    val date: String,
+    val countryCode: String?,
+    val countryName: String?,
+    val pointCount: Int
 )

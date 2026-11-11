@@ -9,6 +9,7 @@ Personal travel history, world map, GPS location tracker, and country day-counti
 - **GPS Tracking** - Battery-efficient background location recording
 - **Google Timeline Import** - Import location history from Google Takeout exports
 - **Travel Statistics** - Countries visited, cities explored, yearly summaries
+- **Recorded Days Audit** - Filter by date and inspect country evidence or missing data day by day
 - **Privacy-First** - Local-only storage, no cloud uploads, no account required
 
 ## Quick Start

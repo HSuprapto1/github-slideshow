@@ -2,10 +2,12 @@ package com.roamatlas.presentation.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
@@ -29,6 +31,13 @@ sealed class Screen(
         title = "Map",
         selectedIcon = Icons.Filled.Map,
         unselectedIcon = Icons.Outlined.Map
+    )
+
+    data object Days : Screen(
+        route = "days",
+        title = "Days",
+        selectedIcon = Icons.Filled.CalendarMonth,
+        unselectedIcon = Icons.Outlined.CalendarMonth
     )
     
     data object Statistics : Screen(
@@ -94,6 +103,7 @@ sealed class Screen(
 val bottomNavItems = listOf(
     Screen.Dashboard,
     Screen.Map,
+    Screen.Days,
     Screen.Statistics,
     Screen.Settings
 )

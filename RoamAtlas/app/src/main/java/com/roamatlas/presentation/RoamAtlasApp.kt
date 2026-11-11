@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
+import com.roamatlas.presentation.screens.days.DayAuditScreen
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
 import com.roamatlas.presentation.screens.flights.AddFlightScreen
@@ -122,6 +123,9 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.Map.route) {
                     MapScreenV2()
+                }
+                composable(Screen.Days.route) {
+                    DayAuditScreen()
                 }
                 composable(Screen.Statistics.route) {
                     StatisticsScreen()

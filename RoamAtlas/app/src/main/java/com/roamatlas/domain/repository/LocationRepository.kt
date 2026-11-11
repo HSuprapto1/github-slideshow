@@ -3,6 +3,13 @@ package com.roamatlas.domain.repository
 import com.roamatlas.domain.model.LocationRecord
 import kotlinx.coroutines.flow.Flow
 
+data class DailyCountryRecord(
+    val date: String,
+    val countryCode: String?,
+    val countryName: String?,
+    val pointCount: Int
+)
+
 interface LocationRepository {
     fun getAllLocations(): Flow<List<LocationRecord>>
     fun getLocationsBetween(startMillis: Long, endMillis: Long): Flow<List<LocationRecord>>
@@ -29,5 +36,9 @@ interface LocationRepository {
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
     suspend fun countDaysOutsideCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
     suspend fun countTrackedDays(startMillis: Long, endMillis: Long): Int
+    suspend fun getDailyCountryEvidence(
+        startMillis: Long,
+        endMillis: Long
+    ): List<DailyCountryRecord>
     suspend fun isDuplicate(originalSourceId: String): Boolean
 }
