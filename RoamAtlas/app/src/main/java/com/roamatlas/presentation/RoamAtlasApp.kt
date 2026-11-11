@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
+import com.roamatlas.presentation.screens.country.CountryDetailScreen
 import com.roamatlas.presentation.screens.days.DayAuditScreen
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
@@ -126,6 +127,9 @@ fun RoamAtlasApp(
                     DashboardScreenV2(
                         onSelectHomeCountry = {
                             navController.navigate(Screen.HomeCountry.route)
+                        },
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
                         }
                     )
                 }
@@ -136,6 +140,11 @@ fun RoamAtlasApp(
                     val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
                     MapScreenV2(initialDate = date)
                 }
+                composable(Screen.Map.DAY_COUNTRY_ROUTE) { entry ->
+                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                    val country = entry.arguments?.getString("country")
+                    MapScreenV2(initialDate = date, initialCountryCode = country)
+                }
                 composable(Screen.Days.route) {
                     DayAuditScreen(
                         onOpenMap = { date ->
@@ -144,7 +153,11 @@ fun RoamAtlasApp(
                     )
                 }
                 composable(Screen.Statistics.route) {
-                    StatisticsScreen()
+                    StatisticsScreen(
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        }
+                    )
                 }
                 composable(Screen.Settings.route) {
                     SettingsScreen(
@@ -234,6 +247,16 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.StorageUsage.route) {
                     StorageUsageScreen(onNavigateBack = { navController.popBackStack() })
+                }
+                composable(Screen.CountryDetail.route) {
+                    CountryDetailScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode ->
+                            navController.navigate(
+                                Screen.Map.forCountryDate(date.toString(), countryCode)
+                            )
+                        }
+                    )
                 }
             }
         }

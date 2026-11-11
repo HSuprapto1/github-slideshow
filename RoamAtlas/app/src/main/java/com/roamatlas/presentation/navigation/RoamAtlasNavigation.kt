@@ -33,7 +33,10 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Map
     ) {
         const val DAY_ROUTE = "map/day/{date}"
+        const val DAY_COUNTRY_ROUTE = "map/day/{date}/{country}"
         fun forDate(date: String) = "map/day/$date"
+        fun forCountryDate(date: String, countryCode: String) =
+            "map/day/$date/${countryCode.uppercase()}"
     }
 
     data object Days : Screen(
@@ -106,6 +109,13 @@ sealed class Screen(
         route = "storage_usage",
         title = "Storage Usage"
     )
+
+    data object CountryDetail : Screen(
+        route = "country/{code}",
+        title = "Country History"
+    ) {
+        fun forCode(countryCode: String) = "country/${countryCode.uppercase()}"
+    }
 }
 
 val bottomNavItems = listOf(

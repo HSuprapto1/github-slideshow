@@ -5,6 +5,9 @@ import com.roamatlas.data.local.toDomain
 import com.roamatlas.data.local.toEntity
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.DailyCountryRecord
+import com.roamatlas.domain.repository.CountryDayRecord
+import com.roamatlas.domain.repository.CountryDetail
+import com.roamatlas.domain.repository.CountryYearRecord
 import com.roamatlas.domain.repository.LocationRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -61,9 +64,10 @@ class LocationRepositoryImpl @Inject constructor(
 
     override fun getLocationsForLocalDate(
         localDate: LocalDate,
+        countryCode: String?,
         limit: Int
     ): Flow<List<LocationRecord>> =
-        locationDao.getLocationsForLocalDate(localDate.toString(), limit)
+        locationDao.getLocationsForLocalDate(localDate.toString(), countryCode, limit)
             .map { entities -> entities.map { it.toDomain() } }
     
     override suspend fun getLocationById(id: Long): LocationRecord? {
@@ -140,8 +144,45 @@ class LocationRepositoryImpl @Inject constructor(
                 pointCount = it.pointCount
             )
         }
+
+    override suspend fun getCountryDetail(countryCode: String): CountryDetail {
+        val summary = locationDao.getCountryDetailsSummary(countryCode)
+        return CountryDetail(
+            countryCode = countryCode,
+            countryName = summary.countryName ?: countryCode,
+            pointCount = summary.pointCount,
+            daysRecorded = summary.daysRecorded,
+            cityCount = summary.cityCount,
+            firstDate = summary.firstDate.toLocalDateOrNull(),
+            lastDate = summary.lastDate.toLocalDateOrNull()
+        )
+    }
+
+    override suspend fun getCountryYearRecords(
+        countryCode: String
+    ): List<CountryYearRecord> = locationDao.getCountryYearSummaries(countryCode).mapNotNull {
+        val year = it.year.toIntOrNull() ?: return@mapNotNull null
+        CountryYearRecord(year, it.pointCount, it.daysRecorded, it.cityCount)
+    }
+
+    override suspend fun getCountryDayRecords(
+        countryCode: String
+    ): List<CountryDayRecord> = locationDao.getCountryDailySummaries(countryCode).mapNotNull {
+        val date = it.date.toLocalDateOrNull() ?: return@mapNotNull null
+        CountryDayRecord(
+            date = date,
+            pointCount = it.pointCount,
+            cities = it.cities?.split(',')?.filter(String::isNotBlank).orEmpty()
+        )
+    }
     
     override suspend fun isDuplicate(originalSourceId: String): Boolean {
         return locationDao.getByOriginalSourceId(originalSourceId) != null
+    }
+
+    private fun String?.toLocalDateOrNull(): LocalDate? = try {
+        this?.let(LocalDate::parse)
+    } catch (_: Exception) {
+        null
     }
 }

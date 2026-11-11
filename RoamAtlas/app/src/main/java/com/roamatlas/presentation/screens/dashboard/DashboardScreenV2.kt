@@ -2,6 +2,7 @@ package com.roamatlas.presentation.screens.dashboard
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,6 +68,7 @@ import java.util.Locale
 @Composable
 fun DashboardScreenV2(
     onSelectHomeCountry: () -> Unit = {},
+    onOpenCountry: (String) -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -147,7 +149,10 @@ fun DashboardScreenV2(
                 
                 if (uiState.travelStats.countriesVisitedList.isNotEmpty()) {
                     item {
-                        TopCountriesSection(uiState.travelStats.countriesVisitedList)
+                        TopCountriesSection(
+                            countries = uiState.travelStats.countriesVisitedList,
+                            onOpenCountry = onOpenCountry
+                        )
                     }
                 }
                 
@@ -624,7 +629,10 @@ private fun HomeCountrySection(
 }
 
 @Composable
-private fun TopCountriesSection(countries: List<CountryVisitStats>) {
+private fun TopCountriesSection(
+    countries: List<CountryVisitStats>,
+    onOpenCountry: (String) -> Unit
+) {
     Column {
         Text(
             text = "Top Countries",
@@ -638,15 +646,16 @@ private fun TopCountriesSection(countries: List<CountryVisitStats>) {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(countries.take(10)) { country ->
-                CountryChip(country)
+                CountryChip(country, onClick = { onOpenCountry(country.countryCode) })
             }
         }
     }
 }
 
 @Composable
-private fun CountryChip(country: CountryVisitStats) {
+private fun CountryChip(country: CountryVisitStats, onClick: () -> Unit) {
     Card(
+        modifier = Modifier.clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )

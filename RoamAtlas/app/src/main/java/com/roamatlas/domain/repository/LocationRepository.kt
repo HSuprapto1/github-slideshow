@@ -11,6 +11,29 @@ data class DailyCountryRecord(
     val pointCount: Int
 )
 
+data class CountryDetail(
+    val countryCode: String,
+    val countryName: String,
+    val pointCount: Int,
+    val daysRecorded: Int,
+    val cityCount: Int,
+    val firstDate: LocalDate?,
+    val lastDate: LocalDate?
+)
+
+data class CountryYearRecord(
+    val year: Int,
+    val pointCount: Int,
+    val daysRecorded: Int,
+    val cityCount: Int
+)
+
+data class CountryDayRecord(
+    val date: LocalDate,
+    val pointCount: Int,
+    val cities: List<String>
+)
+
 interface LocationRepository {
     fun getAllLocations(): Flow<List<LocationRecord>>
     fun getLocationsBetween(startMillis: Long, endMillis: Long): Flow<List<LocationRecord>>
@@ -27,6 +50,7 @@ interface LocationRepository {
     ): Flow<List<LocationRecord>>
     fun getLocationsForLocalDate(
         localDate: LocalDate,
+        countryCode: String? = null,
         limit: Int = 5_000
     ): Flow<List<LocationRecord>>
     
@@ -55,5 +79,8 @@ interface LocationRepository {
         startMillis: Long,
         endMillis: Long
     ): List<DailyCountryRecord>
+    suspend fun getCountryDetail(countryCode: String): CountryDetail
+    suspend fun getCountryYearRecords(countryCode: String): List<CountryYearRecord>
+    suspend fun getCountryDayRecords(countryCode: String): List<CountryDayRecord>
     suspend fun isDuplicate(originalSourceId: String): Boolean
 }

@@ -106,16 +106,20 @@ class MapViewModel @Inject constructor(
         loadLocations()
     }
 
-    fun showLocalDate(date: LocalDate) {
+    fun showLocalDate(date: LocalDate, countryCode: String? = null) {
         locationsJob?.cancel()
         _uiState.value = _uiState.value.copy(
             filterStartDate = date,
             filterEndDate = date,
-            filterCountryCode = null,
+            filterCountryCode = countryCode,
             isLoading = true
         )
         locationsJob = viewModelScope.launch {
-            locationRepository.getLocationsForLocalDate(date, MAX_MAP_POINTS)
+            locationRepository.getLocationsForLocalDate(
+                localDate = date,
+                countryCode = countryCode,
+                limit = MAX_MAP_POINTS
+            )
                 .collect { locations ->
                     val center = calculateCenter(locations)
                     _uiState.value = _uiState.value.copy(

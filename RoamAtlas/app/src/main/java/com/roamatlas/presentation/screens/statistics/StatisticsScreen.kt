@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.statistics
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -41,6 +42,7 @@ import com.roamatlas.domain.model.CountryVisitClassification
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatisticsScreen(
+    onOpenCountry: (String) -> Unit = {},
     viewModel: StatisticsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -158,7 +160,8 @@ fun StatisticsScreen(
                             it.classification,
                             it.classificationReason
                         )
-                    }
+                    },
+                    onOpenCountry = onOpenCountry
                 )
             }
             
@@ -240,7 +243,10 @@ data class CountryStats(
 )
 
 @Composable
-private fun CountryListCard(countries: List<CountryStats>) {
+private fun CountryListCard(
+    countries: List<CountryStats>,
+    onOpenCountry: (String) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -254,6 +260,7 @@ private fun CountryListCard(countries: List<CountryStats>) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable { onOpenCountry(country.code) }
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
