@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -42,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -158,7 +160,11 @@ fun DashboardScreenV2(
                     }
                     
                     items(uiState.customTrackers) { result ->
-                        CustomTrackerCard(result)
+                        CustomTrackerCard(
+                            result = result,
+                            onEdit = { viewModel.editTracker(result.tracker) },
+                            onDelete = { viewModel.requestDeleteTracker(result.tracker) }
+                        )
                     }
                 }
                 
@@ -175,8 +181,29 @@ fun DashboardScreenV2(
             defaultCountryCode = uiState.homeCountryCode,
             historyStart = uiState.travelStats.earliestRecordDate,
             historyEnd = uiState.travelStats.latestRecordDate,
+            existingTracker = uiState.editingTracker,
             onDismiss = viewModel::hideAddTrackerDialog,
-            onAdd = viewModel::addTracker
+            onAdd = viewModel::saveTracker
+        )
+    }
+
+    uiState.trackerPendingDelete?.let { tracker ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDeleteTracker,
+            title = { Text("Delete this counter?") },
+            text = {
+                Text("\"${tracker.name}\" will be removed. Your Timeline data will not be deleted.")
+            },
+            confirmButton = {
+                Button(onClick = viewModel::confirmDeleteTracker) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDeleteTracker) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -648,7 +675,9 @@ private fun CountryChip(country: CountryVisitStats) {
 
 @Composable
 private fun CustomTrackerCard(
-    result: com.roamatlas.domain.model.TrackerResult
+    result: com.roamatlas.domain.model.TrackerResult,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -691,6 +720,17 @@ private fun CustomTrackerCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onEdit) {
+                    Text("Edit")
+                }
+                TextButton(onClick = onDelete) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             }
         }

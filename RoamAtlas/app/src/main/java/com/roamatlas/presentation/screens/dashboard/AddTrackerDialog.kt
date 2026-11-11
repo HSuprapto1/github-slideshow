@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -28,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.roamatlas.domain.model.CountingMode
+import com.roamatlas.domain.model.DayTracker
 import java.time.LocalDate
 
 private enum class TrackerPeriod(val label: String) {
@@ -43,6 +43,7 @@ fun AddTrackerDialog(
     defaultCountryCode: String?,
     historyStart: LocalDate?,
     historyEnd: LocalDate?,
+    existingTracker: DayTracker? = null,
     onDismiss: () -> Unit,
     onAdd: (
         name: String,
@@ -56,17 +57,29 @@ fun AddTrackerDialog(
         thresholdDays: Int?
     ) -> Unit
 ) {
-    val initialCountry = countries.firstOrNull { it.first == defaultCountryCode }
+    val initialCountry = countries.firstOrNull {
+        it.first == (existingTracker?.countryCode ?: defaultCountryCode)
+    }
         ?: countries.firstOrNull()
     var selectedCountry by remember { mutableStateOf(initialCountry) }
     var countrySearch by remember { mutableStateOf(initialCountry?.second.orEmpty()) }
     var showCountryResults by remember { mutableStateOf(false) }
-    var countInside by remember { mutableStateOf(true) }
-    var period by remember { mutableStateOf(TrackerPeriod.ALL_HISTORY) }
-    var name by remember { mutableStateOf("") }
-    var startText by remember { mutableStateOf(historyStart?.toString().orEmpty()) }
-    var endText by remember { mutableStateOf(historyEnd?.toString().orEmpty()) }
-    var thresholdText by remember { mutableStateOf("") }
+    var countInside by remember {
+        mutableStateOf(existingTracker?.countInsideCountry ?: true)
+    }
+    var period by remember {
+        mutableStateOf(existingTracker.toTrackerPeriod(historyStart, historyEnd))
+    }
+    var name by remember { mutableStateOf(existingTracker?.name.orEmpty()) }
+    var startText by remember {
+        mutableStateOf((existingTracker?.startDate ?: historyStart)?.toString().orEmpty())
+    }
+    var endText by remember {
+        mutableStateOf((existingTracker?.endDate ?: historyEnd)?.toString().orEmpty())
+    }
+    var thresholdText by remember {
+        mutableStateOf(existingTracker?.thresholdDays?.toString().orEmpty())
+    }
     var validationMessage by remember { mutableStateOf<String?>(null) }
 
     val matches = remember(countrySearch, countries) {
@@ -78,7 +91,9 @@ fun AddTrackerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add a day counter") },
+        title = {
+            Text(if (existingTracker == null) "Add a day counter" else "Edit day counter")
+        },
         text = {
             LazyColumn(
                 modifier = Modifier.heightIn(max = 520.dp)
@@ -241,13 +256,30 @@ fun AddTrackerDialog(
                     )
                 }
             ) {
-                Text("Add counter")
+                Text(if (existingTracker == null) "Add counter" else "Save changes")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+private fun DayTracker?.toTrackerPeriod(
+    historyStart: LocalDate?,
+    historyEnd: LocalDate?
+): TrackerPeriod = when (this?.countingMode) {
+    null -> TrackerPeriod.ALL_HISTORY
+    CountingMode.CALENDAR_YEAR -> TrackerPeriod.THIS_YEAR
+    CountingMode.ROLLING_12_MONTHS -> TrackerPeriod.LAST_12_MONTHS
+    CountingMode.CUSTOM_START_UNTIL_TODAY -> TrackerPeriod.CUSTOM
+    CountingMode.CUSTOM_DATE_RANGE -> {
+        if (startDate == historyStart && endDate == historyEnd) {
+            TrackerPeriod.ALL_HISTORY
+        } else {
+            TrackerPeriod.CUSTOM
+        }
+    }
 }
 
 private data class TrackerValues(

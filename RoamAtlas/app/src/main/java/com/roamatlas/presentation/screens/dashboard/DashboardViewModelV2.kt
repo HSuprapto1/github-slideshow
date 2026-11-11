@@ -30,6 +30,8 @@ data class DashboardUiStateV2(
     val isLoading: Boolean = true,
     val hasData: Boolean = false,
     val showAddTrackerDialog: Boolean = false,
+    val editingTracker: DayTracker? = null,
+    val trackerPendingDelete: DayTracker? = null,
     val countries: List<Pair<String, String>> = emptyList(),
     val errorMessage: String? = null
 )
@@ -161,14 +163,43 @@ class DashboardViewModelV2 @Inject constructor(
     }
     
     fun showAddTrackerDialog() {
-        _uiState.value = _uiState.value.copy(showAddTrackerDialog = true)
+        _uiState.value = _uiState.value.copy(
+            showAddTrackerDialog = true,
+            editingTracker = null
+        )
     }
     
     fun hideAddTrackerDialog() {
-        _uiState.value = _uiState.value.copy(showAddTrackerDialog = false)
+        _uiState.value = _uiState.value.copy(
+            showAddTrackerDialog = false,
+            editingTracker = null
+        )
     }
 
-    fun addTracker(
+    fun editTracker(tracker: DayTracker) {
+        _uiState.value = _uiState.value.copy(
+            showAddTrackerDialog = true,
+            editingTracker = tracker
+        )
+    }
+
+    fun requestDeleteTracker(tracker: DayTracker) {
+        _uiState.value = _uiState.value.copy(trackerPendingDelete = tracker)
+    }
+
+    fun dismissDeleteTracker() {
+        _uiState.value = _uiState.value.copy(trackerPendingDelete = null)
+    }
+
+    fun confirmDeleteTracker() {
+        val tracker = _uiState.value.trackerPendingDelete ?: return
+        viewModelScope.launch {
+            dayTrackerRepository.deleteTrackerById(tracker.id)
+            dismissDeleteTracker()
+        }
+    }
+
+    fun saveTracker(
         name: String,
         countryCode: String,
         countryName: String,
@@ -180,8 +211,9 @@ class DashboardViewModelV2 @Inject constructor(
         thresholdDays: Int? = null
     ) {
         viewModelScope.launch {
-            dayTrackerRepository.insertTracker(
-                DayTracker(
+            val existing = _uiState.value.editingTracker
+            val tracker = DayTracker(
+                    id = existing?.id ?: 0,
                     name = name.ifBlank {
                         if (countInsideCountry) "Days in $countryName" else "Days outside $countryName"
                     },
@@ -193,9 +225,16 @@ class DashboardViewModelV2 @Inject constructor(
                     year = year,
                     thresholdDays = thresholdDays,
                     countInsideCountry = countInsideCountry,
-                    displayOrder = dayTrackerRepository.getNextDisplayOrder()
+                    displayOrder = existing?.displayOrder
+                        ?: dayTrackerRepository.getNextDisplayOrder(),
+                    createdAt = existing?.createdAt ?: Instant.now(),
+                    updatedAt = Instant.now()
                 )
-            )
+            if (existing == null) {
+                dayTrackerRepository.insertTracker(tracker)
+            } else {
+                dayTrackerRepository.updateTracker(tracker)
+            }
             hideAddTrackerDialog()
         }
     }

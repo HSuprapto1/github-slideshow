@@ -80,19 +80,34 @@ interface LocationDao {
     @Query("SELECT COUNT(DISTINCT city) FROM locations WHERE city IS NOT NULL AND city != ''")
     suspend fun countDistinctCities(): Int
 
-    @Query("SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) FROM locations")
+    @Query("""
+        SELECT COUNT(DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        )) FROM locations
+    """)
     suspend fun countTrackedDays(): Int
 
     @Query("""
-        SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch'))
+        SELECT COUNT(DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ))
         FROM locations
         WHERE timestampMillis BETWEEN :startMillis AND :endMillis
     """)
     suspend fun countTrackedDaysBetween(startMillis: Long, endMillis: Long): Int
 
     @Query("""
-        SELECT countryCode, countryName, COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS daysSpent,
-               COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS visitCount,
+        SELECT countryCode, countryName,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS daysSpent,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS visitCount,
                MIN(timestampMillis) AS firstTimestamp, MAX(timestampMillis) AS lastTimestamp
         FROM locations
         WHERE countryCode IS NOT NULL
@@ -102,8 +117,15 @@ interface LocationDao {
     suspend fun getCountryVisitSummaries(): List<CountryVisitSummary>
 
     @Query("""
-        SELECT strftime('%Y', timestampMillis / 1000, 'unixepoch') AS year,
-               COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS daysTracked,
+        SELECT strftime(
+                   '%Y',
+                   (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               ) AS year,
+               COUNT(DISTINCT DATE(
+                   (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+                   'unixepoch'
+               )) AS daysTracked,
                COUNT(DISTINCT countryCode) AS countriesVisited
         FROM locations
         WHERE countryCode IS NOT NULL
@@ -135,18 +157,32 @@ interface LocationDao {
     suspend fun getByOriginalSourceId(sourceId: String): LocationEntity?
     
     @Query("""
-        SELECT DISTINCT DATE(timestampMillis / 1000, 'unixepoch') as date, countryCode 
+        SELECT DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ) as date, countryCode
         FROM locations 
         WHERE countryCode = :countryCode 
         AND timestampMillis BETWEEN :startMillis AND :endMillis
     """)
     suspend fun getDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): List<DayCountryResult>
     
-    @Query("SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) FROM locations WHERE countryCode = :countryCode AND timestampMillis BETWEEN :startMillis AND :endMillis")
+    @Query("""
+        SELECT COUNT(DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ))
+        FROM locations
+        WHERE countryCode = :countryCode
+          AND timestampMillis BETWEEN :startMillis AND :endMillis
+    """)
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
 
     @Query("""
-        SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch'))
+        SELECT COUNT(DISTINCT DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ))
         FROM locations
         WHERE countryCode IS NOT NULL
           AND countryCode != :countryCode
