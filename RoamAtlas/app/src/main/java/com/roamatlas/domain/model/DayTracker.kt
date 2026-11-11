@@ -42,5 +42,7 @@ data class TrackerResult(
     val daysInRange: Int,
     val percentageComplete: Float,
     val thresholdExceeded: Boolean?,
-    val lastCalculated: java.time.Instant
+    val lastCalculated: java.time.Instant,
+    val daysUntilRangeEnd: Int = 0,
+    val daysNeededForThreshold: Int? = null
 )

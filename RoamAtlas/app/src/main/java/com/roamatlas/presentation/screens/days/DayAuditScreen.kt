@@ -63,6 +63,7 @@ fun DayAuditScreen(
     val state by viewModel.uiState.collectAsState()
     var choosingStartDate by remember { mutableStateOf<Boolean?>(null) }
     var showCountryPicker by remember { mutableStateOf(false) }
+    var thresholdText by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -141,8 +142,20 @@ fun DayAuditScreen(
                             text = "Count days outside ${state.selectedCountryName}",
                             onClick = { viewModel.setCountInside(false) }
                         )
+                        OutlinedTextField(
+                            value = thresholdText,
+                            onValueChange = { thresholdText = it.filter(Char::isDigit) },
+                            label = { Text("Target number of days (optional)") },
+                            supportingText = {
+                                Text("Dashboard will show how many more days are needed")
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Button(
-                            onClick = viewModel::saveRangeAsCounter,
+                            onClick = {
+                                viewModel.saveRangeAsCounter(thresholdText.toIntOrNull())
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Save this range")

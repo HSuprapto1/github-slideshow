@@ -116,6 +116,13 @@ class DashboardViewModelV2 @Inject constructor(
                 )
                 ((evidenceDates + manualOutside) - manualInside).size
             }
+            val daysUntilRangeEnd = ChronoUnit.DAYS
+                .between(LocalDate.now(), endDate)
+                .coerceAtLeast(0)
+                .toInt()
+            val daysNeededForThreshold = tracker.thresholdDays?.let {
+                (it - resultDays).coerceAtLeast(0)
+            }
             
             TrackerResult(
                 tracker = tracker,
@@ -129,7 +136,9 @@ class DashboardViewModelV2 @Inject constructor(
                     resultDays.toFloat() / trackedDays * 100f
                 } else 0f,
                 thresholdExceeded = tracker.thresholdDays?.let { resultDays >= it },
-                lastCalculated = Instant.now()
+                lastCalculated = Instant.now(),
+                daysUntilRangeEnd = daysUntilRangeEnd,
+                daysNeededForThreshold = daysNeededForThreshold
             )
         }
     }

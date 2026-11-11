@@ -150,7 +150,7 @@ class DayAuditViewModel @Inject constructor(
         }
     }
 
-    fun saveRangeAsCounter() {
+    fun saveRangeAsCounter(thresholdDays: Int? = null) {
         val state = _uiState.value
         viewModelScope.launch {
             val direction = if (state.countInsideCountry) "in" else "outside"
@@ -163,6 +163,7 @@ class DayAuditViewModel @Inject constructor(
                     countingMode = CountingMode.CUSTOM_DATE_RANGE,
                     startDate = state.startDate,
                     endDate = state.endDate,
+                    thresholdDays = thresholdDays,
                     countInsideCountry = state.countInsideCountry,
                     displayOrder = dayTrackerRepository.getNextDisplayOrder()
                 )

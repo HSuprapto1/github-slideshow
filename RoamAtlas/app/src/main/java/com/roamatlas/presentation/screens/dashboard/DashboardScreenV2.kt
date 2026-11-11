@@ -38,6 +38,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -722,6 +723,57 @@ private fun CustomTrackerCard(
                     )
                 }
             }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TrackerMetric(
+                    value = result.totalDays.toString(),
+                    label = if (result.tracker.countInsideCountry) {
+                        "inside so far"
+                    } else {
+                        "outside so far"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                TrackerMetric(
+                    value = result.daysUntilRangeEnd.toString(),
+                    label = "days until range ends",
+                    modifier = Modifier.weight(1f)
+                )
+                TrackerMetric(
+                    value = when {
+                        result.tracker.thresholdDays == null -> "Not set"
+                        result.thresholdExceeded == true -> "Reached"
+                        else -> result.daysNeededForThreshold.toString()
+                    },
+                    label = when {
+                        result.tracker.thresholdDays == null -> "threshold"
+                        result.thresholdExceeded == true -> "threshold"
+                        else -> "more days needed"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            result.tracker.thresholdDays?.let { threshold ->
+                Text(
+                    text = "Target: $threshold " +
+                        if (result.tracker.countInsideCountry) "inside days" else "outside days",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (result.thresholdExceeded == true) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (result.thresholdExceeded == true) {
+                        FontWeight.Bold
+                    } else {
+                        FontWeight.Normal
+                    },
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
@@ -734,6 +786,31 @@ private fun CustomTrackerCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TrackerMetric(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }
 

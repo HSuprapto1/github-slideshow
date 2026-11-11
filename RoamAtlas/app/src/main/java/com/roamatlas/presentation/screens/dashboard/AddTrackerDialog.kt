@@ -194,7 +194,10 @@ fun AddTrackerDialog(
                     OutlinedTextField(
                         value = thresholdText,
                         onValueChange = { thresholdText = it.filter(Char::isDigit) },
-                        label = { Text("Alert after this many days (optional)") },
+                        label = { Text("Target number of days (optional)") },
+                        supportingText = {
+                            Text("The counter will show how many more days are needed")
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
