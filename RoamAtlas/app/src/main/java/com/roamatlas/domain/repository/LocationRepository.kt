@@ -9,6 +9,14 @@ interface LocationRepository {
     fun getLocationsByCountry(countryCode: String): Flow<List<LocationRecord>>
     fun getDistinctCountryCodes(): Flow<List<String>>
     fun getLocationCount(): Flow<Int>
+    fun getFilteredLocationCount(startMillis: Long?, endMillis: Long?, countryCode: String?): Flow<Int>
+    fun getMapSample(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?,
+        sampleEvery: Int,
+        limit: Int
+    ): Flow<List<LocationRecord>>
     
     suspend fun getLocationById(id: Long): LocationRecord?
     suspend fun getEarliestTimestamp(): Long?

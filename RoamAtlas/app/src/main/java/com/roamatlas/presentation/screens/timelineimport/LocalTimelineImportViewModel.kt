@@ -21,22 +21,27 @@ class LocalTimelineImportViewModel @Inject constructor(
     data class UiState(
         val isProcessing: Boolean = false,
         val result: LocalTimelineImporter.ImportResult? = null,
-        val selectedUri: Uri? = null
+        val selectedUri: Uri? = null,
+        val progress: LocalTimelineImporter.ImportProgress? = null
     )
     
     fun importFromFolder(uri: Uri) {
         _uiState.value = _uiState.value.copy(selectedUri = uri, isProcessing = true)
         viewModelScope.launch {
-            val result = importer.importFromFolder(uri)
-            _uiState.value = _uiState.value.copy(isProcessing = false, result = result)
+            val result = importer.importFromFolder(uri) { progress ->
+                _uiState.value = _uiState.value.copy(progress = progress)
+            }
+            _uiState.value = _uiState.value.copy(isProcessing = false, result = result, progress = null)
         }
     }
     
     fun importFromFile(uri: Uri) {
         _uiState.value = _uiState.value.copy(selectedUri = uri, isProcessing = true)
         viewModelScope.launch {
-            val result = importer.importFromFile(uri)
-            _uiState.value = _uiState.value.copy(isProcessing = false, result = result)
+            val result = importer.importFromFile(uri) { progress ->
+                _uiState.value = _uiState.value.copy(progress = progress)
+            }
+            _uiState.value = _uiState.value.copy(isProcessing = false, result = result, progress = null)
         }
     }
     

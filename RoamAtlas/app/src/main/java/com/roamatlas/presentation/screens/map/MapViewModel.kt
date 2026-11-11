@@ -5,9 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -36,6 +39,7 @@ class MapViewModel @Inject constructor(
     
     private val _uiState = MutableStateFlow(MapUiState())
     val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
+    private var locationsJob: Job? = null
     
     init {
         loadLocations()
@@ -43,42 +47,39 @@ class MapViewModel @Inject constructor(
     }
     
     private fun loadLocations() {
-        viewModelScope.launch {
+        locationsJob?.cancel()
+        locationsJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             
             val startDate = _uiState.value.filterStartDate
             val endDate = _uiState.value.filterEndDate
             val countryCode = _uiState.value.filterCountryCode
             
-            val locationsFlow = when {
-                startDate != null && endDate != null -> {
-                    val startMillis = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    val endMillis = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    locationRepository.getLocationsBetween(startMillis, endMillis)
+            val startMillis = startDate?.atStartOfDay(ZoneId.systemDefault())
+                ?.toInstant()?.toEpochMilli()
+            val endMillis = endDate?.plusDays(1)?.atStartOfDay(ZoneId.systemDefault())
+                ?.toInstant()?.toEpochMilli()
+
+            locationRepository.getFilteredLocationCount(startMillis, endMillis, countryCode)
+                .flatMapLatest { total ->
+                    val sampleEvery = ((total + MAX_MAP_POINTS - 1) / MAX_MAP_POINTS).coerceAtLeast(1)
+                    locationRepository.getMapSample(
+                        startMillis,
+                        endMillis,
+                        countryCode,
+                        sampleEvery,
+                        MAX_MAP_POINTS
+                    ).map { total to it }
                 }
-                countryCode != null -> {
-                    locationRepository.getLocationsByCountry(countryCode)
-                }
-                else -> {
-                    locationRepository.getAllLocations()
-                }
-            }
-            
-            locationsFlow.collect { locations ->
-                val filteredLocations = if (countryCode != null && startDate == null) {
-                    locations.filter { it.countryCode == countryCode }
-                } else {
-                    locations
-                }
-                
-                val center = calculateCenter(filteredLocations)
+                .collect { (total, locations) ->
+                val center = calculateCenter(locations)
                 
                 _uiState.value = _uiState.value.copy(
-                    locations = filteredLocations,
-                    totalLocations = filteredLocations.size,
+                    locations = locations,
+                    totalLocations = total,
                     mapCenterLat = center.first,
                     mapCenterLng = center.second,
-                    mapZoom = if (filteredLocations.isEmpty()) 2f else calculateZoom(filteredLocations),
+                    mapZoom = if (locations.isEmpty()) 2f else calculateZoom(locations),
                     isLoading = false
                 )
             }
@@ -163,5 +164,9 @@ class MapViewModel @Inject constructor(
             maxSpan > 0.5 -> 12f
             else -> 14f
         }
+    }
+
+    companion object {
+        private const val MAX_MAP_POINTS = 5_000
     }
 }

@@ -10,7 +10,7 @@ import com.roamatlas.domain.model.YearlyTravelStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.mapLatest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -41,20 +41,34 @@ class TravelStatisticsRepository @Inject constructor(
         )
     }
     
-    fun getTravelStatistics(): Flow<TravelStatistics> = flow {
-        val homeCountryCode = getHomeCountryCode()
-        
-        val locationCount = locationDao.getLocationCount().first()
-        val countryCodes = locationDao.getDistinctCountryCodes().first()
+    fun getTravelStatistics(): Flow<TravelStatistics> =
+        combine(
+            locationDao.getLocationCount(),
+            flightDao.getFlightCount(),
+            getHomeCountryCodeFlow()
+        ) { locationCount, flightCount, homeCountryCode ->
+            Triple(locationCount, flightCount, homeCountryCode)
+        }.mapLatest { (locationCount, flightCount, homeCountryCode) ->
+        val countrySummaries = locationDao.getCountryVisitSummaries()
         val earliestTimestamp = locationDao.getEarliestTimestamp()
         val latestTimestamp = locationDao.getLatestTimestamp()
         
         val totalFlightDistance = flightDao.getTotalFlightDistance() ?: 0.0
         val totalFlightDuration = flightDao.getTotalFlightDuration() ?: 0
-        val flightCount = flightDao.getFlightCount().first()
         val longestFlight = flightDao.getLongestFlight()
         
-        val countryStats = calculateCountryStats(homeCountryCode)
+        val countryStats = countrySummaries.map { summary ->
+            CountryVisitStats(
+                countryCode = summary.countryCode,
+                countryName = summary.countryName ?: getCountryName(summary.countryCode),
+                daysSpent = summary.daysSpent,
+                visitCount = summary.visitCount,
+                firstVisit = Instant.ofEpochMilli(summary.firstTimestamp)
+                    .atZone(ZoneId.systemDefault()).toLocalDate(),
+                lastVisit = Instant.ofEpochMilli(summary.lastTimestamp)
+                    .atZone(ZoneId.systemDefault()).toLocalDate()
+            )
+        }
         val mostVisited = countryStats.maxByOrNull { it.daysSpent }
         
         val (daysInside, daysOutside) = if (homeCountryCode != null) {
@@ -65,9 +79,9 @@ class TravelStatisticsRepository @Inject constructor(
         
         val yearlyStats = calculateYearlyStats()
         
-        emit(TravelStatistics(
-            totalCountriesVisited = countryCodes.size,
-            totalCitiesVisited = 0,
+        TravelStatistics(
+            totalCountriesVisited = countryStats.size,
+            totalCitiesVisited = locationDao.countDistinctCities(),
             totalLocationsRecorded = locationCount,
             totalFlights = flightCount,
             totalFlightDistanceKm = totalFlightDistance,
@@ -89,56 +103,34 @@ class TravelStatisticsRepository @Inject constructor(
             },
             countriesVisitedList = countryStats,
             yearlyStats = yearlyStats
-        ))
-    }
-    
-    private suspend fun calculateCountryStats(homeCountryCode: String?): List<CountryVisitStats> {
-        val countryCodes = locationDao.getDistinctCountryCodes().first()
-        
-        return countryCodes.mapNotNull { code ->
-            if (code.isNullOrBlank()) return@mapNotNull null
-            
-            val countryName = getCountryName(code)
-            val earliest = locationDao.getEarliestTimestamp()
-            val latest = locationDao.getLatestTimestamp()
-            
-            if (earliest == null || latest == null) return@mapNotNull null
-            
-            val daysCount = locationDao.countDaysInCountry(code, earliest, latest)
-            
-            CountryVisitStats(
-                countryCode = code,
-                countryName = countryName,
-                daysSpent = daysCount,
-                visitCount = 1,
-                firstVisit = null,
-                lastVisit = null
-            )
-        }.sortedByDescending { it.daysSpent }
+        )
     }
     
     private suspend fun calculateDaysInsideOutside(homeCountryCode: String): Pair<Int, Int> {
         val earliest = locationDao.getEarliestTimestamp() ?: return Pair(0, 0)
         val latest = locationDao.getLatestTimestamp() ?: return Pair(0, 0)
-        
         val daysInHome = locationDao.countDaysInCountry(homeCountryCode, earliest, latest)
-        
-        val totalDays = ((latest - earliest) / (24 * 60 * 60 * 1000)).toInt() + 1
-        val daysOutside = totalDays - daysInHome
+        val totalTrackedDays = locationDao.countTrackedDays()
+        val daysOutside = totalTrackedDays - daysInHome
         
         return Pair(daysInHome, maxOf(0, daysOutside))
     }
     
     private suspend fun calculateYearlyStats(): List<YearlyTravelStats> {
-        val flightStats = flightDao.getYearlyFlightStats()
-        
-        return flightStats.map { stats ->
+        val flightStats = flightDao.getYearlyFlightStats().associateBy { it.year }
+        val locationStats = locationDao.getYearlyLocationSummaries().associateBy { it.year }
+        return (flightStats.keys + locationStats.keys)
+            .mapNotNull { it.toIntOrNull() }
+            .sortedDescending()
+            .map { year ->
+            val flight = flightStats[year.toString()]
+            val location = locationStats[year.toString()]
             YearlyTravelStats(
-                year = stats.year.toIntOrNull() ?: 0,
-                countriesVisited = 0,
-                daysTracked = 0,
-                flights = stats.flightCount,
-                flightDistanceKm = stats.totalDistance ?: 0.0
+                year = year,
+                countriesVisited = location?.countriesVisited ?: 0,
+                daysTracked = location?.daysTracked ?: 0,
+                flights = flight?.flightCount ?: 0,
+                flightDistanceKm = flight?.totalDistance ?: 0.0
             )
         }
     }

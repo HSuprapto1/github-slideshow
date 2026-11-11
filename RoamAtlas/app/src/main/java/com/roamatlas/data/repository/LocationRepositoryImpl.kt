@@ -40,6 +40,22 @@ class LocationRepositoryImpl @Inject constructor(
     override fun getLocationCount(): Flow<Int> {
         return locationDao.getLocationCount()
     }
+
+    override fun getFilteredLocationCount(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?
+    ): Flow<Int> = locationDao.getFilteredLocationCount(startMillis, endMillis, countryCode)
+
+    override fun getMapSample(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?,
+        sampleEvery: Int,
+        limit: Int
+    ): Flow<List<LocationRecord>> =
+        locationDao.getMapSample(startMillis, endMillis, countryCode, sampleEvery, limit)
+            .map { entities -> entities.map { it.toDomain() } }
     
     override suspend fun getLocationById(id: Long): LocationRecord? {
         return locationDao.getLocationById(id)?.toDomain()

@@ -47,6 +47,66 @@ interface LocationDao {
     
     @Query("SELECT COUNT(*) FROM locations")
     fun getLocationCount(): Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM locations
+        WHERE (:startMillis IS NULL OR timestampMillis >= :startMillis)
+          AND (:endMillis IS NULL OR timestampMillis < :endMillis)
+          AND (:countryCode IS NULL OR countryCode = :countryCode)
+    """)
+    fun getFilteredLocationCount(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?
+    ): Flow<Int>
+
+    @Query("""
+        SELECT * FROM locations
+        WHERE (:startMillis IS NULL OR timestampMillis >= :startMillis)
+          AND (:endMillis IS NULL OR timestampMillis < :endMillis)
+          AND (:countryCode IS NULL OR countryCode = :countryCode)
+          AND (id % :sampleEvery = 0)
+        ORDER BY timestampMillis ASC
+        LIMIT :limit
+    """)
+    fun getMapSample(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?,
+        sampleEvery: Int,
+        limit: Int
+    ): Flow<List<LocationEntity>>
+
+    @Query("SELECT COUNT(DISTINCT city) FROM locations WHERE city IS NOT NULL AND city != ''")
+    suspend fun countDistinctCities(): Int
+
+    @Query("SELECT COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) FROM locations")
+    suspend fun countTrackedDays(): Int
+
+    @Query("""
+        SELECT countryCode, countryName, COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS daysSpent,
+               COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS visitCount,
+               MIN(timestampMillis) AS firstTimestamp, MAX(timestampMillis) AS lastTimestamp
+        FROM locations
+        WHERE countryCode IS NOT NULL
+        GROUP BY countryCode, countryName
+        ORDER BY daysSpent DESC
+    """)
+    suspend fun getCountryVisitSummaries(): List<CountryVisitSummary>
+
+    @Query("""
+        SELECT strftime('%Y', timestampMillis / 1000, 'unixepoch') AS year,
+               COUNT(DISTINCT DATE(timestampMillis / 1000, 'unixepoch')) AS daysTracked,
+               COUNT(DISTINCT countryCode) AS countriesVisited
+        FROM locations
+        WHERE countryCode IS NOT NULL
+        GROUP BY year
+        ORDER BY year DESC
+    """)
+    suspend fun getYearlyLocationSummaries(): List<YearlyLocationSummary>
+
+    @Query("SELECT * FROM locations WHERE id > :afterId ORDER BY id ASC LIMIT :limit")
+    suspend fun getPage(afterId: Long, limit: Int): List<LocationEntity>
     
     @Query("SELECT MIN(timestampMillis) FROM locations")
     suspend fun getEarliestTimestamp(): Long?
@@ -72,4 +132,19 @@ interface LocationDao {
 data class DayCountryResult(
     val date: String,
     val countryCode: String
+)
+
+data class CountryVisitSummary(
+    val countryCode: String,
+    val countryName: String?,
+    val daysSpent: Int,
+    val visitCount: Int,
+    val firstTimestamp: Long,
+    val lastTimestamp: Long
+)
+
+data class YearlyLocationSummary(
+    val year: String,
+    val daysTracked: Int,
+    val countriesVisited: Int
 )
