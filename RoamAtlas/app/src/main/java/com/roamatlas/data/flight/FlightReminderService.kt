@@ -150,23 +150,27 @@ class FlightReminderService : Service() {
         try {
             val now = System.currentTimeMillis()
             val next24Hours = now + TimeUnit.HOURS.toMillis(24)
+            val previous24Hours = now - TimeUnit.HOURS.toMillis(24)
             
-            // Get flights in the next 24 hours
-            val upcomingFlights = flightDao.getFlightsBetween(now, next24Hours).first()
+            val nearbyFlights = flightDao.getFlightsBetween(previous24Hours, next24Hours).first()
+            val upcomingFlight = nearbyFlights
+                .filter { it.departureTimeMillis >= now }
+                .minByOrNull { it.departureTimeMillis }
+            val previousFlight = nearbyFlights
+                .filter { it.arrivalTimeMillis <= now }
+                .maxByOrNull { it.arrivalTimeMillis }
             val settings = reminderManager.settings.first()
             if (!settings.isEnabled) {
                 stopSelf()
                 return
             }
             
-            if (upcomingFlights.isEmpty()) return
+            if (upcomingFlight == null) return
             
             // Get current location
             val currentLocation = getCurrentLocation() ?: return
             
-            for (flight in upcomingFlights) {
-                analyzeFlightStatus(flight, currentLocation, now, settings)
-            }
+            analyzeFlightStatus(upcomingFlight, previousFlight, currentLocation, now, settings)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -204,6 +208,7 @@ class FlightReminderService : Service() {
     
     private fun analyzeFlightStatus(
         flight: FlightEntity,
+        previousFlight: FlightEntity?,
         currentLocation: Location,
         now: Long,
         settings: FlightReminderSettings
@@ -237,6 +242,13 @@ class FlightReminderService : Service() {
         val timeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
         val flightTime = timeFormatter.format(Date(departureTime))
         val route = "${flight.departureAirportCode} → ${flight.arrivalAirportCode}"
+        val isTransit = previousFlight != null &&
+            previousFlight.arrivalAirportCode.equals(flight.departureAirportCode, ignoreCase = true) &&
+            flight.departureTimeMillis - previousFlight.arrivalTimeMillis in
+                0..TimeUnit.HOURS.toMillis(24)
+        val gate = noteValue(flight.notes, "Departure gate")
+        val gateText = gate?.let { " Gate $it." }
+            ?: " Gate not available; check the airline or airport display."
         
         when {
             // User is already near airport - all good
@@ -244,8 +256,18 @@ class FlightReminderService : Service() {
                 settings.notifyWhenAtAirport -> {
                 sendNotification(
                     id = NOTIFICATION_ID_REMINDER,
-                    title = "✈️ You're at the airport!",
-                    message = "Flight $route departs at $flightTime. Have a safe journey!",
+                    title = if (isTransit) {
+                        "✈️ Next flight${flight.flightNumber?.let { " $it" }.orEmpty()}"
+                    } else {
+                        "✈️ You're at the airport"
+                    },
+                    message = buildString {
+                        append("Flight $route departs at $flightTime.")
+                        if (isTransit) {
+                            append(" Transit time remaining: ${formatDuration(minutesUntilFlight)}.")
+                        }
+                        append(gateText)
+                    },
                     priority = NotificationCompat.PRIORITY_DEFAULT,
                     airportCoords = airportCoords,
                     flight = flight
@@ -298,6 +320,19 @@ class FlightReminderService : Service() {
             }
             
         }
+    }
+
+    private fun noteValue(notes: String?, label: String): String? =
+        notes?.lineSequence()
+            ?.firstOrNull { it.startsWith("$label:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun formatDuration(totalMinutes: Long): String {
+        val hours = totalMinutes.coerceAtLeast(0) / 60
+        val minutes = totalMinutes.coerceAtLeast(0) % 60
+        return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
     }
     
     private fun sendNotification(

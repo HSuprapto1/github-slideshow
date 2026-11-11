@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 import com.roamatlas.data.email.ParsedFlight
 import com.roamatlas.data.email.ParsedItinerary
 import java.text.SimpleDateFormat
@@ -76,11 +77,16 @@ fun ImportFlightsScreen(
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data).result
-            if (account != null) {
-                viewModel.handleSignInResult(account)
-            }
+        try {
+            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+            viewModel.handleSignInResult(account)
+        } catch (error: Exception) {
+            val detail = (error as? ApiException)?.statusCode?.let { "error code $it" }
+                ?: error.message
+                ?: if (result.resultCode == Activity.RESULT_CANCELED) "sign-in was cancelled"
+                else "unknown sign-in error"
+            viewModel.handleSignInFailure(detail)
         }
     }
     
@@ -93,8 +99,17 @@ fun ImportFlightsScreen(
     
     LaunchedEffect(uiState.importSuccess) {
         if (uiState.importSuccess) {
-            snackbarHostState.showSnackbar("Flights imported successfully!")
+            snackbarHostState.showSnackbar(
+                uiState.importMessage ?: "Flights imported successfully!"
+            )
             viewModel.clearImportSuccess()
+        }
+    }
+
+    LaunchedEffect(uiState.connectionMessage) {
+        uiState.connectionMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearConnectionMessage()
         }
     }
     
@@ -345,7 +360,8 @@ private fun GmailConnectionCard(
                     )
                     if (isSignedIn) {
                         Text(
-                            text = email ?: "Connected account email unavailable",
+                            text = email?.let { "Connected as $it" }
+                                ?: "Connected account email unavailable",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )

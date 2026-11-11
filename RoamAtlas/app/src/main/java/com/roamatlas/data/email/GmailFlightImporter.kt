@@ -15,8 +15,11 @@ import com.google.api.services.gmail.GmailScopes
 import com.google.api.services.gmail.model.Message
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.Base64
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -139,7 +142,16 @@ class GmailFlightImporter @Inject constructor(
      * Sign out from Gmail.
      */
     suspend fun signOut() = withContext(Dispatchers.Main) {
-        (googleSignInClient ?: createSignInClient()).signOut()
+        val client = googleSignInClient ?: createSignInClient()
+        suspendCancellableCoroutine { continuation ->
+            client.revokeAccess()
+                .addOnSuccessListener {
+                    if (continuation.isActive) continuation.resume(Unit)
+                }
+                .addOnFailureListener { error ->
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+        }
         gmailService = null
     }
     

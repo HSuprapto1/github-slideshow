@@ -37,6 +37,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +48,7 @@ fun FlightRemindersScreen(
     viewModel: FlightRemindersViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val upcoming by viewModel.upcomingFlight.collectAsState()
     
     Scaffold(
         topBar = {
@@ -73,6 +77,8 @@ fun FlightRemindersScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            UpcomingFlightCard(upcoming)
+
             // Main toggle
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -246,6 +252,84 @@ fun FlightRemindersScreen(
         }
     }
 }
+
+@Composable
+private fun UpcomingFlightCard(state: UpcomingFlightState) {
+    val flight = state.flight
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = if (state.isTransit) "Your next transit flight" else "Your next flight",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (flight == null) {
+                Text("No future flight is saved yet.")
+                Text(
+                    "Add a flight manually or import one from Gmail.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                return@Column
+            }
+            val time = SimpleDateFormat("EEE, d MMM yyyy • HH:mm", Locale.getDefault())
+                .format(Date(flight.departureTimeMillis))
+            val flightLabel = listOfNotNull(flight.airline, flight.flightNumber)
+                .joinToString(" • ")
+                .ifBlank { "Flight details not supplied" }
+            Text(flightLabel, fontWeight = FontWeight.SemiBold)
+            Text("${flight.departureAirportCode} → ${flight.arrivalAirportCode}")
+            Text("Departure: $time")
+            Text("Leaves in ${formatRemainingTime(state.minutesUntilDeparture)}")
+            if (state.isTransit && state.transitMinutesRemaining != null) {
+                Text(
+                    "Transit time remaining: ${formatRemainingTime(state.transitMinutesRemaining)}",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            flight.seatNumber?.takeIf { it.isNotBlank() }?.let { Text("Seat: $it") }
+            val gate = noteValue(flight.notes, "Departure gate")
+            val terminal = noteValue(flight.notes, "Departure terminal")
+            Text(
+                buildString {
+                    if (terminal != null) append("Terminal $terminal • ")
+                    append(gate?.let { "Gate $it" }
+                        ?: "Gate not available—check the airline or airport display")
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                "Gate information is shown only when it was found in your booking email.",
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+private fun formatRemainingTime(minutes: Long): String {
+    val days = minutes / (24 * 60)
+    val hours = (minutes % (24 * 60)) / 60
+    val remainingMinutes = minutes % 60
+    return buildList {
+        if (days > 0) add("${days}d")
+        if (hours > 0 || days > 0) add("${hours}h")
+        add("${remainingMinutes}m")
+    }.joinToString(" ")
+}
+
+private fun noteValue(notes: String?, label: String): String? =
+    notes?.lineSequence()
+        ?.firstOrNull { it.startsWith("$label:", ignoreCase = true) }
+        ?.substringAfter(':')
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
 
 @Composable
 private fun SectionHeader(

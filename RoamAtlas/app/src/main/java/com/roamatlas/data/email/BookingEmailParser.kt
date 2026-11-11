@@ -19,7 +19,9 @@ data class ParsedFlight(
     val bookingReference: String?,
     val passengerName: String?,
     val seatNumber: String?,
-    val aircraftType: String?
+    val aircraftType: String?,
+    val departureGate: String? = null,
+    val departureTerminal: String? = null
 )
 
 data class ParsedItinerary(
@@ -62,6 +64,20 @@ class BookingEmailParser {
         
         // Time patterns
         private val TIME_PATTERN = Pattern.compile("\\b(\\d{1,2})[:.](\\d{2})\\s*(AM|PM|am|pm)?\\b")
+        private val GATE_PATTERN = Pattern.compile(
+            "\\b(?:Departure\\s+)?Gate\\s*[:#-]?\\s*([A-Z]?\\d{1,3}[A-Z]?)\\b",
+            Pattern.CASE_INSENSITIVE
+        )
+        private val TERMINAL_PATTERN = Pattern.compile(
+            "\\b(?:Departure\\s+)?Terminal\\s*[:#-]?\\s*([A-Z0-9]{1,4})\\b",
+            Pattern.CASE_INSENSITIVE
+        )
+        private val DATE_TEXT_PATTERNS = listOf(
+            Pattern.compile("\\b\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{4}\\b"),
+            Pattern.compile("\\b[A-Za-z]{3,9}\\s+\\d{1,2},\\s*\\d{4}\\b"),
+            Pattern.compile("\\b\\d{1,2}/\\d{1,2}/\\d{4}\\b"),
+            Pattern.compile("\\b\\d{4}-\\d{2}-\\d{2}\\b")
+        )
         
         // Route patterns (SIN → CGK, SIN - CGK, SIN to CGK)
         private val ROUTE_PATTERNS = listOf(
@@ -139,6 +155,10 @@ class BookingEmailParser {
     
     private fun extractFlights(text: String): List<ParsedFlight> {
         val flights = mutableListOf<ParsedFlight>()
+        val dates = extractDates(text)
+        val times = extractTimes(text)
+        val gates = extractValues(text, GATE_PATTERN)
+        val terminals = extractValues(text, TERMINAL_PATTERN)
         
         // Try to extract routes first
         val routes = mutableListOf<Pair<String, String>>()
@@ -172,19 +192,32 @@ class BookingEmailParser {
                 val flightNum = flightNumbers.getOrNull(index)
                 val airline = flightNum?.first?.let { AIRLINE_NAMES[it] ?: it }
                 val fullFlightNumber = flightNum?.let { "${it.first}${it.second}" }
+                val departureTime = combineDateTime(
+                    dates.getOrNull(index) ?: dates.firstOrNull(),
+                    times.getOrNull(index * 2)
+                )
+                var arrivalTime = combineDateTime(
+                    dates.getOrNull(index) ?: dates.firstOrNull(),
+                    times.getOrNull(index * 2 + 1)
+                )
+                if (arrivalTime != null && departureTime != null && arrivalTime < departureTime) {
+                    arrivalTime += 24 * 60 * 60 * 1000L
+                }
                 
                 flights.add(
                     ParsedFlight(
                         departureAirportCode = route.first,
                         arrivalAirportCode = route.second,
-                        departureTimeMillis = null, // TODO: Parse from context
-                        arrivalTimeMillis = null,
+                        departureTimeMillis = departureTime,
+                        arrivalTimeMillis = arrivalTime,
                         flightNumber = fullFlightNumber,
                         airline = airline,
                         bookingReference = null,
                         passengerName = null,
                         seatNumber = null,
-                        aircraftType = null
+                        aircraftType = null,
+                        departureGate = gates.getOrNull(index),
+                        departureTerminal = terminals.getOrNull(index)
                     )
                 )
             }
@@ -204,18 +237,32 @@ class BookingEmailParser {
             // Pair consecutive codes as routes
             for (i in 0 until airportCodes.size - 1 step 2) {
                 if (airportCodes[i] != airportCodes[i + 1]) {
+                    val flightIndex = i / 2
+                    val departureTime = combineDateTime(
+                        dates.getOrNull(flightIndex) ?: dates.firstOrNull(),
+                        times.getOrNull(flightIndex * 2)
+                    )
+                    var arrivalTime = combineDateTime(
+                        dates.getOrNull(flightIndex) ?: dates.firstOrNull(),
+                        times.getOrNull(flightIndex * 2 + 1)
+                    )
+                    if (arrivalTime != null && departureTime != null && arrivalTime < departureTime) {
+                        arrivalTime += 24 * 60 * 60 * 1000L
+                    }
                     flights.add(
                         ParsedFlight(
                             departureAirportCode = airportCodes[i],
                             arrivalAirportCode = airportCodes[i + 1],
-                            departureTimeMillis = null,
-                            arrivalTimeMillis = null,
+                            departureTimeMillis = departureTime,
+                            arrivalTimeMillis = arrivalTime,
                             flightNumber = flightNumbers.getOrNull(i / 2)?.let { "${it.first}${it.second}" },
                             airline = null,
                             bookingReference = null,
                             passengerName = null,
                             seatNumber = null,
-                            aircraftType = null
+                            aircraftType = null,
+                            departureGate = gates.getOrNull(i / 2),
+                            departureTerminal = terminals.getOrNull(i / 2)
                         )
                     )
                 }
@@ -223,6 +270,52 @@ class BookingEmailParser {
         }
         
         return flights
+    }
+
+    private fun extractValues(text: String, pattern: Pattern): List<String> {
+        val values = mutableListOf<Pair<Int, String>>()
+        val matcher = pattern.matcher(text)
+        while (matcher.find()) {
+            matcher.group(1)?.let { values.add(matcher.start() to it.uppercase()) }
+        }
+        return values.sortedBy { it.first }.map { it.second }
+    }
+
+    private fun extractDates(text: String): List<Long> {
+        val candidates = mutableListOf<Pair<Int, String>>()
+        DATE_TEXT_PATTERNS.forEach { pattern ->
+            val matcher = pattern.matcher(text)
+            while (matcher.find()) candidates.add(matcher.start() to matcher.group())
+        }
+        return candidates.sortedBy { it.first }.mapNotNull { (_, raw) ->
+            DATE_FORMATS.firstNotNullOfOrNull { format ->
+                runCatching {
+                    format.isLenient = false
+                    format.parse(raw)?.time
+                }.getOrNull()
+            }
+        }
+    }
+
+    private fun extractTimes(text: String): List<Pair<Int, Int>> {
+        val values = mutableListOf<Pair<Int, Pair<Int, Int>>>()
+        val matcher = TIME_PATTERN.matcher(text)
+        while (matcher.find()) {
+            parseTime(matcher.group())?.let { values.add(matcher.start() to it) }
+        }
+        return values.sortedBy { it.first }.map { it.second }
+    }
+
+    private fun combineDateTime(dateMillis: Long?, time: Pair<Int, Int>?): Long? {
+        if (dateMillis == null) return null
+        if (time == null) return dateMillis
+        return Calendar.getInstance().apply {
+            this.timeInMillis = dateMillis
+            set(Calendar.HOUR_OF_DAY, time.first)
+            set(Calendar.MINUTE, time.second)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
     }
     
     private fun detectAirline(text: String): String? {

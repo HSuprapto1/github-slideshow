@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,6 +25,8 @@ data class ImportFlightsUiState(
     val selectedItineraries: Set<ParsedItinerary> = emptySet(),
     val isImporting: Boolean = false,
     val importSuccess: Boolean = false,
+    val importMessage: String? = null,
+    val connectionMessage: String? = null,
     val error: String? = null
 )
 
@@ -70,7 +73,9 @@ class ImportFlightsViewModel @Inject constructor(
                 _uiState.update { 
                     it.copy(
                         isSignedIn = true,
-                        signedInEmail = account.email
+                        signedInEmail = account.email,
+                        connectionMessage = "Connected successfully as ${account.email ?: "Google account"}",
+                        error = null
                     ) 
                 }
             } else {
@@ -78,17 +83,36 @@ class ImportFlightsViewModel @Inject constructor(
             }
         }
     }
+
+    fun handleSignInFailure(message: String) {
+        _uiState.update {
+            it.copy(
+                isSignedIn = false,
+                signedInEmail = null,
+                connectionMessage = null,
+                error = "Gmail connection failed: $message"
+            )
+        }
+    }
     
     fun signOut() {
         viewModelScope.launch {
-            gmailFlightImporter.signOut()
-            _uiState.update { 
-                it.copy(
-                    isSignedIn = false,
-                    signedInEmail = null,
-                    parsedItineraries = emptyList(),
-                    selectedItineraries = emptySet()
-                ) 
+            try {
+                gmailFlightImporter.signOut()
+                _uiState.update {
+                    it.copy(
+                        isSignedIn = false,
+                        signedInEmail = null,
+                        parsedItineraries = emptyList(),
+                        selectedItineraries = emptySet(),
+                        connectionMessage = "Gmail connection removed",
+                        error = null
+                    )
+                }
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(error = "Could not remove Gmail connection: ${error.message}")
+                }
             }
         }
     }
@@ -157,11 +181,47 @@ class ImportFlightsViewModel @Inject constructor(
             try {
                 val selectedItineraries = _uiState.value.selectedItineraries
                 var importedCount = 0
+                var matchedCount = 0
+                var skippedCount = 0
+                val existingFlights = flightDao.getAllFlights().first().toMutableList()
                 
                 for (itinerary in selectedItineraries) {
                     for (flight in itinerary.flights) {
                         val now = System.currentTimeMillis()
-                        val depTime = flight.departureTimeMillis ?: now
+                        val matchingFlight = findMatchingFlight(existingFlights, flight, now)
+                        if (matchingFlight != null) {
+                            val merged = matchingFlight.copy(
+                                flightNumber = matchingFlight.flightNumber ?: flight.flightNumber,
+                                airline = matchingFlight.airline ?: flight.airline ?: itinerary.airline,
+                                aircraftType = matchingFlight.aircraftType ?: flight.aircraftType,
+                                seatNumber = matchingFlight.seatNumber ?: flight.seatNumber,
+                                bookingReference = matchingFlight.bookingReference
+                                    ?: flight.bookingReference
+                                    ?: itinerary.bookingReference,
+                                notes = mergeEmailDetails(
+                                    matchingFlight.notes,
+                                    flight.departureGate,
+                                    flight.departureTerminal,
+                                    includeCombinedSource = true
+                                ),
+                                source = if (matchingFlight.source.contains("EMAIL")) {
+                                    matchingFlight.source
+                                } else {
+                                    "${matchingFlight.source}+EMAIL_IMPORT"
+                                },
+                                updatedAtMillis = now
+                            )
+                            flightDao.update(merged)
+                            existingFlights[existingFlights.indexOf(matchingFlight)] = merged
+                            matchedCount++
+                            continue
+                        }
+
+                        val depTime = flight.departureTimeMillis
+                        if (depTime == null) {
+                            skippedCount++
+                            continue
+                        }
                         val arrTime = flight.arrivalTimeMillis ?: depTime
                         
                         val flightEntity = FlightEntity(
@@ -183,15 +243,33 @@ class ImportFlightsViewModel @Inject constructor(
                             durationMinutes = null,
                             seatNumber = flight.seatNumber,
                             bookingReference = flight.bookingReference ?: itinerary.bookingReference,
-                            notes = null,
+                            notes = mergeEmailDetails(
+                                existingNotes = null,
+                                gate = flight.departureGate,
+                                terminal = flight.departureTerminal,
+                                includeCombinedSource = false
+                            ),
                             photoUri = null,
                             source = "EMAIL_IMPORT",
                             createdAtMillis = now,
                             updatedAtMillis = now
                         )
                         
-                        flightDao.insert(flightEntity)
+                        val id = flightDao.insert(flightEntity)
+                        existingFlights.add(flightEntity.copy(id = id))
                         importedCount++
+                    }
+                }
+
+                val resultParts = buildList {
+                    if (matchedCount > 0) {
+                        add("$matchedCount flight${if (matchedCount == 1) "" else "s"} matched your manual entry and ${if (matchedCount == 1) "was" else "were"} updated")
+                    }
+                    if (importedCount > 0) {
+                        add("$importedCount new flight${if (importedCount == 1) "" else "s"} imported")
+                    }
+                    if (skippedCount > 0) {
+                        add("$skippedCount skipped because the email had no travel date; add it manually")
                     }
                 }
                 
@@ -199,6 +277,7 @@ class ImportFlightsViewModel @Inject constructor(
                     it.copy(
                         isImporting = false,
                         importSuccess = true,
+                        importMessage = resultParts.joinToString(". "),
                         selectedItineraries = emptySet(),
                         parsedItineraries = it.parsedItineraries - selectedItineraries
                     ) 
@@ -213,12 +292,72 @@ class ImportFlightsViewModel @Inject constructor(
             }
         }
     }
+
+    private fun findMatchingFlight(
+        existingFlights: List<FlightEntity>,
+        parsed: com.roamatlas.data.email.ParsedFlight,
+        now: Long
+    ): FlightEntity? {
+        val parsedNumber = normalizedFlightNumber(parsed.flightNumber)
+        val routeMatches = existingFlights.filter { existing ->
+            existing.departureAirportCode.equals(parsed.departureAirportCode, ignoreCase = true) &&
+                existing.arrivalAirportCode.equals(parsed.arrivalAirportCode, ignoreCase = true)
+        }
+        parsed.departureTimeMillis?.let { parsedTime ->
+            val candidates = routeMatches.filter { existing ->
+                val existingNumber = normalizedFlightNumber(existing.flightNumber)
+                (parsedNumber != null && existingNumber == parsedNumber) ||
+                    kotlin.math.abs(existing.departureTimeMillis - parsedTime) <= 6 * 60 * 60 * 1000L
+            }
+            return candidates.minByOrNull {
+                kotlin.math.abs(it.departureTimeMillis - parsedTime)
+            }?.takeIf {
+                val sameNumber = normalizedFlightNumber(it.flightNumber) == parsedNumber
+                kotlin.math.abs(it.departureTimeMillis - parsedTime) <=
+                    (if (sameNumber) 24 else 6) * 60 * 60 * 1000L
+            }
+        }
+        if (parsedNumber == null) return null
+        val relevantMatches = routeMatches.filter {
+            normalizedFlightNumber(it.flightNumber) == parsedNumber &&
+            it.departureTimeMillis in (now - 7 * 24 * 60 * 60 * 1000L)..(now + 366L * 24 * 60 * 60 * 1000L)
+        }
+        return relevantMatches.singleOrNull()
+    }
+
+    private fun normalizedFlightNumber(value: String?): String? =
+        value?.filter(Char::isLetterOrDigit)?.uppercase()?.takeIf { it.isNotEmpty() }
+
+    private fun mergeEmailDetails(
+        existingNotes: String?,
+        gate: String?,
+        terminal: String?,
+        includeCombinedSource: Boolean
+    ): String? {
+        val additions = buildList {
+            gate?.let { add("Departure gate: $it") }
+            terminal?.let { add("Departure terminal: $it") }
+            if (includeCombinedSource) add("Sources: Manual entry + Gmail")
+        }
+        if (additions.isEmpty()) return existingNotes
+        val lines = existingNotes.orEmpty().lines().filter { it.isNotBlank() }.toMutableList()
+        additions.forEach { addition ->
+            val label = addition.substringBefore(':')
+            lines.removeAll { it.startsWith("$label:", ignoreCase = true) }
+            lines.add(addition)
+        }
+        return lines.joinToString("\n")
+    }
     
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
     
     fun clearImportSuccess() {
-        _uiState.update { it.copy(importSuccess = false) }
+        _uiState.update { it.copy(importSuccess = false, importMessage = null) }
+    }
+
+    fun clearConnectionMessage() {
+        _uiState.update { it.copy(connectionMessage = null) }
     }
 }
