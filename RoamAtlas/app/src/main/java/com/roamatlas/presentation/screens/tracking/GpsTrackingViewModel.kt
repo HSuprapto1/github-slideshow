@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.location.LocationTracker
 import com.roamatlas.data.location.LocationTrackingService
 import com.roamatlas.data.location.TrackingMode
+import com.roamatlas.data.location.TrackingPreferences
 import com.roamatlas.data.location.TrackingState
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,10 +38,11 @@ data class GpsTrackingUiState(
 class GpsTrackingViewModel @Inject constructor(
     private val locationTracker: LocationTracker,
     private val locationRepository: LocationRepository,
+    private val trackingPreferences: TrackingPreferences,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
     
-    private val _selectedMode = MutableStateFlow(TrackingMode.SMART)
+    private val _selectedMode = MutableStateFlow(trackingPreferences.mode)
     private val _showModeSelector = MutableStateFlow(false)
     private val _totalLocations = MutableStateFlow(0)
     
@@ -95,6 +97,7 @@ class GpsTrackingViewModel @Inject constructor(
     
     fun selectMode(mode: TrackingMode) {
         _selectedMode.value = mode
+        trackingPreferences.mode = mode
         _showModeSelector.value = false
         
         if (locationTracker.trackingState.value.isTracking) {
