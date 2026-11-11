@@ -84,6 +84,11 @@ sealed class Screen(
         route = "local_timeline_import",
         title = "Import from Phone"
     )
+
+    data object Backup : Screen(
+        route = "encrypted_backup",
+        title = "Encrypted Backup"
+    )
 }
 
 val bottomNavItems = listOf(

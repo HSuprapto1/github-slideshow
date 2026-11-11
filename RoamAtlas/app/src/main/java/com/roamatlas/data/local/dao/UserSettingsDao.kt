@@ -12,6 +12,9 @@ interface UserSettingsDao {
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun setSetting(setting: UserSettingsEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setSettings(settings: List<UserSettingsEntity>)
     
     @Query("SELECT value FROM user_settings WHERE `key` = :key")
     suspend fun getSetting(key: String): String?
@@ -21,6 +24,12 @@ interface UserSettingsDao {
     
     @Query("SELECT * FROM user_settings")
     fun getAllSettings(): Flow<List<UserSettingsEntity>>
+
+    @Query("SELECT * FROM user_settings")
+    suspend fun getAllSettingsSnapshot(): List<UserSettingsEntity>
+
+    @Query("DELETE FROM user_settings")
+    suspend fun deleteAll()
     
     @Query("DELETE FROM user_settings WHERE `key` = :key")
     suspend fun deleteSetting(key: String)

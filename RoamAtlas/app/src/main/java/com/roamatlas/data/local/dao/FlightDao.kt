@@ -38,6 +38,12 @@ interface FlightDao {
     
     @Query("SELECT COUNT(*) FROM flights")
     fun getFlightCount(): Flow<Int>
+
+    @Query("SELECT * FROM flights WHERE id > :afterId ORDER BY id ASC LIMIT :limit")
+    suspend fun getPage(afterId: Long, limit: Int): List<FlightEntity>
+
+    @Query("DELETE FROM flights")
+    suspend fun deleteAll()
     
     @Query("SELECT SUM(distanceKm) FROM flights WHERE distanceKm IS NOT NULL")
     suspend fun getTotalFlightDistance(): Double?

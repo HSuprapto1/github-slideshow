@@ -59,7 +59,8 @@ fun SettingsScreen(
     onNavigateToHomeCountry: () -> Unit = {},
     onNavigateToImportFlights: () -> Unit = {},
     onNavigateToFlightReminders: () -> Unit = {},
-    onNavigateToLocalTimelineImport: () -> Unit = {}
+    onNavigateToLocalTimelineImport: () -> Unit = {},
+    onNavigateToBackup: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -100,9 +101,9 @@ fun SettingsScreen(
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.Default.Download,
-                        title = "Export Data",
-                        subtitle = "Export all location data as JSON",
-                        onClick = { /* TODO */ }
+                        title = "Encrypted backup",
+                        subtitle = "Export or restore all RoamAtlas data",
+                        onClick = onNavigateToBackup
                     )
                 }
             }

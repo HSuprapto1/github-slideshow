@@ -31,6 +31,7 @@ import com.roamatlas.presentation.screens.flights.FlightRemindersScreen
 import com.roamatlas.presentation.screens.flights.ImportFlightsScreen
 import com.roamatlas.presentation.screens.timelineimport.LocalTimelineImportScreen
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
+import com.roamatlas.presentation.screens.settings.BackupScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
 import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
@@ -140,6 +141,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToLocalTimelineImport = {
                             navController.navigate(Screen.LocalTimelineImport.route)
+                        },
+                        onNavigateToBackup = {
+                            navController.navigate(Screen.Backup.route)
                         }
                     )
                 }
@@ -197,6 +201,9 @@ fun RoamAtlasApp(
                             navController.popBackStack()
                         }
                     )
+                }
+                composable(Screen.Backup.route) {
+                    BackupScreen(onNavigateBack = { navController.popBackStack() })
                 }
             }
         }

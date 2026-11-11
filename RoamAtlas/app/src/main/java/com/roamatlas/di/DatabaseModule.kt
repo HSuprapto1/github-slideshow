@@ -27,7 +27,6 @@ object DatabaseModule {
             RoamAtlasDatabase::class.java,
             "roamatlas.db"
         )
-            .fallbackToDestructiveMigration()
             .build()
     }
     
