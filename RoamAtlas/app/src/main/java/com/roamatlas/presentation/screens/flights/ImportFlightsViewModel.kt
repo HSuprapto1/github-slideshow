@@ -43,11 +43,19 @@ class ImportFlightsViewModel @Inject constructor(
     private fun checkSignInStatus() {
         val isSignedIn = gmailFlightImporter.isSignedIn()
         val email = if (isSignedIn) gmailFlightImporter.getSignedInEmail() else null
-        _uiState.update { 
-            it.copy(
-                isSignedIn = isSignedIn,
-                signedInEmail = email
-            ) 
+        if (!isSignedIn) {
+            _uiState.update { it.copy(isSignedIn = false, signedInEmail = null) }
+            return
+        }
+        viewModelScope.launch {
+            val restored = gmailFlightImporter.restoreSignedInSession()
+            _uiState.update {
+                it.copy(
+                    isSignedIn = restored,
+                    signedInEmail = email.takeIf { restored },
+                    error = if (restored) null else "Please reconnect Gmail."
+                )
+            }
         }
     }
     

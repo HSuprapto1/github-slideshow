@@ -343,9 +343,9 @@ private fun GmailConnectionCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
-                    if (isSignedIn && email != null) {
+                    if (isSignedIn) {
                         Text(
-                            text = email,
+                            text = email ?: "Connected account email unavailable",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )

@@ -34,6 +34,7 @@ import com.roamatlas.presentation.screens.timelineimport.LocalTimelineImportScre
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
 import com.roamatlas.presentation.screens.settings.BackupScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
+import com.roamatlas.presentation.screens.settings.StorageUsageScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
 import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
 import java.time.LocalDate
@@ -167,6 +168,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToBackup = {
                             navController.navigate(Screen.Backup.route)
+                        },
+                        onNavigateToStorageUsage = {
+                            navController.navigate(Screen.StorageUsage.route)
                         }
                     )
                 }
@@ -227,6 +231,9 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.Backup.route) {
                     BackupScreen(onNavigateBack = { navController.popBackStack() })
+                }
+                composable(Screen.StorageUsage.route) {
+                    StorageUsageScreen(onNavigateBack = { navController.popBackStack() })
                 }
             }
         }

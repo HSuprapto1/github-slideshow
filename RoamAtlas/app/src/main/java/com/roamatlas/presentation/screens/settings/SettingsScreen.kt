@@ -41,6 +41,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +52,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,8 +66,22 @@ fun SettingsScreen(
     onNavigateToImportFlights: () -> Unit = {},
     onNavigateToFlightReminders: () -> Unit = {},
     onNavigateToLocalTimelineImport: () -> Unit = {},
-    onNavigateToBackup: () -> Unit = {}
+    onNavigateToBackup: () -> Unit = {},
+    onNavigateToStorageUsage: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshAccount()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -139,7 +159,9 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.FlightTakeoff,
                         title = "Import Flights",
-                        subtitle = "Import from Gmail or add flights manually",
+                        subtitle = uiState.connectedGmail?.let {
+                            "Connected Gmail: $it"
+                        } ?: "Gmail not connected · tap to connect or add flights",
                         onClick = onNavigateToImportFlights
                     )
                     HorizontalDivider()
@@ -186,7 +208,7 @@ fun SettingsScreen(
                         icon = Icons.Default.Storage,
                         title = "Storage Usage",
                         subtitle = "Database size and management",
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToStorageUsage
                     )
                     HorizontalDivider()
                     SettingsItem(
@@ -208,7 +230,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.Info,
                         title = "About RoamAtlas",
-                        subtitle = "Version 0.14.0",
+                        subtitle = "Version 0.15.0",
                         onClick = { /* TODO */ }
                     )
                     HorizontalDivider()

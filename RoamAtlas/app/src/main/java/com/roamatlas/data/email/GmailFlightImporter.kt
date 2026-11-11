@@ -74,13 +74,16 @@ class GmailFlightImporter @Inject constructor(
      * Get the sign-in intent for Google OAuth with Gmail read access.
      */
     fun getSignInIntent(): Intent {
+        googleSignInClient = createSignInClient()
+        return googleSignInClient!!.signInIntent
+    }
+
+    private fun createSignInClient(): GoogleSignInClient {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestScopes(Scope(GmailScopes.GMAIL_READONLY))
             .build()
-        
-        googleSignInClient = GoogleSignIn.getClient(context, gso)
-        return googleSignInClient!!.signInIntent
+        return GoogleSignIn.getClient(context, gso)
     }
     
     /**
@@ -123,12 +126,20 @@ class GmailFlightImporter @Inject constructor(
     fun getSignedInEmail(): String? {
         return GoogleSignIn.getLastSignedInAccount(context)?.email
     }
+
+    suspend fun restoreSignedInSession(): Boolean {
+        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return false
+        if (!GoogleSignIn.hasPermissions(account, Scope(GmailScopes.GMAIL_READONLY))) {
+            return false
+        }
+        return handleSignInResult(account)
+    }
     
     /**
      * Sign out from Gmail.
      */
     suspend fun signOut() = withContext(Dispatchers.Main) {
-        googleSignInClient?.signOut()
+        (googleSignInClient ?: createSignInClient()).signOut()
         gmailService = null
     }
     

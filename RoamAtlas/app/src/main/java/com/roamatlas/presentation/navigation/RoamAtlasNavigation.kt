@@ -101,6 +101,11 @@ sealed class Screen(
         route = "encrypted_backup",
         title = "Encrypted Backup"
     )
+
+    data object StorageUsage : Screen(
+        route = "storage_usage",
+        title = "Storage Usage"
+    )
 }
 
 val bottomNavItems = listOf(
