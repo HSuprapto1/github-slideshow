@@ -327,6 +327,7 @@ class LocalTimelineImporter @Inject constructor(
             confidence = confidence,
             originalSourceId = originalSourceId,
             notes = notes,
+            photoUri = null,
             createdAtMillis = now,
             updatedAtMillis = now
         )
@@ -400,7 +401,8 @@ class LocalTimelineImporter @Inject constructor(
             countryCode = place.countryCode, countryName = place.countryName,
             city = loc.optString("name", null) ?: place.city,
             confidence = "VERIFIED", originalSourceId = "pv_$ts",
-            notes = loc.optString("address", null), createdAtMillis = now, updatedAtMillis = now
+            notes = loc.optString("address", null), photoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     
@@ -419,7 +421,8 @@ class LocalTimelineImporter @Inject constructor(
                     source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
                     countryCode = place.countryCode, countryName = place.countryName, city = place.city,
                     confidence = "UNCERTAIN", originalSourceId = "seg_$ts",
-                    notes = null, createdAtMillis = now, updatedAtMillis = now
+                    notes = null, photoUri = null,
+                    createdAtMillis = now, updatedAtMillis = now
                 ))
             }
         }
@@ -445,7 +448,8 @@ class LocalTimelineImporter @Inject constructor(
             source = "GOOGLE_TIMELINE", accuracy = acc, altitude = loc.optDouble("altitude", Double.NaN).takeIf { !it.isNaN() },
             speed = null, countryCode = place.countryCode, countryName = place.countryName, city = place.city,
             confidence = if (acc != null && acc < 50) "VERIFIED" else "UNCERTAIN",
-            originalSourceId = "rec_$ts", notes = null, createdAtMillis = now, updatedAtMillis = now
+            originalSourceId = "rec_$ts", notes = null, photoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     
@@ -469,7 +473,8 @@ class LocalTimelineImporter @Inject constructor(
             countryCode = place.countryCode, countryName = place.countryName,
             city = obj.optString("name", null) ?: place.city,
             confidence = "UNCERTAIN", originalSourceId = "gen_$ts",
-            notes = obj.optString("address", null), createdAtMillis = now, updatedAtMillis = now
+            notes = obj.optString("address", null), photoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     

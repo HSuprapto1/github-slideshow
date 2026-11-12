@@ -77,6 +77,7 @@ interface LocationRepository {
     ): Flow<List<LocationRecord>>
     
     suspend fun getLocationById(id: Long): LocationRecord?
+    suspend fun countForLocalDate(localDate: LocalDate): Int
     suspend fun getEarliestTimestamp(): Long?
     suspend fun getLatestTimestamp(): Long?
     suspend fun insertLocation(location: LocationRecord): Long

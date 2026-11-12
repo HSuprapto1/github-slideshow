@@ -26,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -177,6 +178,21 @@ fun DayAuditScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = state.sortOrder == DaySortOrder.LATEST_FIRST,
+                        onClick = { viewModel.setSortOrder(DaySortOrder.LATEST_FIRST) },
+                        label = { Text("Latest first") }
+                    )
+                    FilterChip(
+                        selected = state.sortOrder == DaySortOrder.OLDEST_FIRST,
+                        onClick = { viewModel.setSortOrder(DaySortOrder.OLDEST_FIRST) },
+                        label = { Text("Oldest first") }
+                    )
+                }
             }
             if (state.isLoading) {
                 item {

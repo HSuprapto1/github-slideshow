@@ -77,6 +77,7 @@ fun DashboardScreenV2(
     onOpenCountry: (String) -> Unit = {},
     onOpenCountries: () -> Unit = {},
     onOpenCities: () -> Unit = {},
+    onOpenToday: () -> Unit = {},
     onOpenJourneys: () -> Unit = {},
     onOpenJourney: (Long) -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
@@ -99,7 +100,7 @@ fun DashboardScreenV2(
                     onClick = { viewModel.showAddMenu() },
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add day counter or place photo")
+                    Icon(Icons.Default.Add, contentDescription = "Add day counter or photo to timeline")
                 }
             }
         }
@@ -141,6 +142,14 @@ fun DashboardScreenV2(
 
                 item {
                     DataCoverageSection(uiState.travelStats)
+                }
+
+                item {
+                    TodayActivityCard(
+                        pointCount = uiState.todayPointCount,
+                        cities = uiState.todayCities,
+                        onOpenToday = onOpenToday
+                    )
                 }
 
                 item {
@@ -222,17 +231,17 @@ fun DashboardScreenV2(
         DashboardAddMenuDialog(
             onDismiss = viewModel::hideAddMenu,
             onAddDayCounter = viewModel::showAddTrackerDialog,
-            onAddPlacePhoto = viewModel::showAddPlacePhotoDialog
+            onAddPlacePhoto = viewModel::showAddPhotoDialog
         )
     }
 
-    if (uiState.showAddPlacePhotoDialog) {
-        AddPlacePhotoDialog(
-            cities = uiState.cities,
-            labels = uiState.placeLabels,
-            photoCounts = uiState.placePhotoCounts,
-            onDismiss = viewModel::hideAddPlacePhotoDialog,
-            onAddPhotos = viewModel::addPhotosToPlace
+    if (uiState.showAddPhotoDialog) {
+        AddPhotoToTimelineDialog(
+            isImporting = uiState.photoImporting,
+            lastResultMessage = uiState.photoImportMessage,
+            onDismiss = viewModel::hideAddPhotoDialog,
+            onImportGallery = viewModel::importGalleryPhotos,
+            onImportCaptured = viewModel::importCapturedPhoto
         )
     }
 
@@ -328,6 +337,45 @@ private fun EmptyStateScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayActivityCard(
+    pointCount: Int,
+    cities: List<String>,
+    onOpenToday: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenToday),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("Today", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (pointCount == 0) "No recorded points yet today"
+                else "$pointCount recorded point${if (pointCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (cities.isNotEmpty()) {
+                Text(
+                    "Around ${cities.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Text(
+                "Tap to open today’s points on the map",
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }

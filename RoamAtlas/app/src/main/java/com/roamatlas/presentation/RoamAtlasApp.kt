@@ -142,6 +142,11 @@ fun RoamAtlasApp(
                         onOpenCities = {
                             navController.navigate(Screen.Cities.route)
                         },
+                        onOpenToday = {
+                            navController.navigate(
+                                Screen.Map.forDate(java.time.LocalDate.now().toString())
+                            )
+                        },
                         onOpenJourneys = {
                             navController.navigate(Screen.Journeys.route)
                         },

@@ -27,6 +27,7 @@ fun LocationEntity.toDomain(): LocationRecord {
         confidence = DataConfidence.valueOf(confidence),
         originalSourceId = originalSourceId,
         notes = notes,
+        photoUri = photoUri,
         createdAt = Instant.ofEpochMilli(createdAtMillis),
         updatedAt = Instant.ofEpochMilli(updatedAtMillis)
     )
@@ -48,6 +49,7 @@ fun LocationRecord.toEntity(): LocationEntity {
         confidence = confidence.name,
         originalSourceId = originalSourceId,
         notes = notes,
+        photoUri = photoUri,
         createdAtMillis = createdAt.toEpochMilli(),
         updatedAtMillis = updatedAt.toEpochMilli()
     )

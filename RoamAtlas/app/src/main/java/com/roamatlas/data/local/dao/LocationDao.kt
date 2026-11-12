@@ -35,6 +35,32 @@ interface LocationDao {
     
     @Query("SELECT * FROM locations WHERE id = :id")
     suspend fun getLocationById(id: Long): LocationEntity?
+
+    @Query("""
+        SELECT * FROM locations
+        WHERE latitude BETWEEN :minLat AND :maxLat
+          AND longitude BETWEEN :minLon AND :maxLon
+          AND ABS(timestampMillis - :timestampMillis) <= :windowMillis
+        ORDER BY ABS(timestampMillis - :timestampMillis) ASC
+        LIMIT 1
+    """)
+    suspend fun findNearby(
+        minLat: Double,
+        maxLat: Double,
+        minLon: Double,
+        maxLon: Double,
+        timestampMillis: Long,
+        windowMillis: Long
+    ): LocationEntity?
+
+    @Query("""
+        SELECT COUNT(*) FROM locations
+        WHERE DATE(
+            (timestampMillis / 1000) + (CAST(ROUND(longitude / 15.0) AS INTEGER) * 3600),
+            'unixepoch'
+        ) = :localDate
+    """)
+    suspend fun countForLocalDate(localDate: String): Int
     
     @Query("SELECT * FROM locations WHERE timestampMillis BETWEEN :startMillis AND :endMillis ORDER BY timestampMillis ASC")
     fun getLocationsBetween(startMillis: Long, endMillis: Long): Flow<List<LocationEntity>>

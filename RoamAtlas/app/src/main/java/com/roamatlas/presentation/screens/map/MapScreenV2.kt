@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.map
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -49,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -64,6 +66,7 @@ import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
+import coil.compose.AsyncImage
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
@@ -215,9 +218,18 @@ fun MapScreenV2(
                         
                         Marker(
                             state = MarkerState(position = LatLng(location.latitude, location.longitude)),
-                            title = location.city ?: formatTimestamp(location.timestamp),
+                            title = buildString {
+                                if (!location.photoUri.isNullOrBlank()) append("Photo · ")
+                                append(location.city ?: formatTimestamp(location.timestamp))
+                            },
                             snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
-                            icon = BitmapDescriptorFactory.defaultMarker(markerColor),
+                            icon = BitmapDescriptorFactory.defaultMarker(
+                                if (!location.photoUri.isNullOrBlank()) {
+                                    BitmapDescriptorFactory.HUE_VIOLET
+                                } else {
+                                    markerColor
+                                }
+                            ),
                             onClick = {
                                 viewModel.selectLocation(location)
                                 true
@@ -425,6 +437,19 @@ private fun LocationDetailCard(
             }
             
             Spacer(modifier = Modifier.height(12.dp))
+
+            location.photoUri?.takeIf { it.isNotBlank() }?.let { photoUri ->
+                AsyncImage(
+                    model = Uri.parse(photoUri),
+                    contentDescription = "Photo for this timeline point",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .size(160.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             
             Row(
                 modifier = Modifier.fillMaxWidth(),

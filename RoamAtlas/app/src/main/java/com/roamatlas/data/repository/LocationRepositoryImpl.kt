@@ -77,6 +77,10 @@ class LocationRepositoryImpl @Inject constructor(
     override suspend fun getLocationById(id: Long): LocationRecord? {
         return locationDao.getLocationById(id)?.toDomain()
     }
+
+    override suspend fun countForLocalDate(localDate: LocalDate): Int {
+        return locationDao.countForLocalDate(localDate.toString())
+    }
     
     override suspend fun getEarliestTimestamp(): Long? {
         return locationDao.getEarliestTimestamp()

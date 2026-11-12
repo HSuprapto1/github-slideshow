@@ -21,6 +21,11 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import javax.inject.Inject
 
+enum class DaySortOrder {
+    OLDEST_FIRST,
+    LATEST_FIRST
+}
+
 data class AuditedDay(
     val date: LocalDate,
     val evidence: List<DailyCountryRecord>,
@@ -42,6 +47,7 @@ data class DayAuditUiState(
     val outsideDays: Int = 0,
     val unknownCountryDays: Int = 0,
     val missingDays: Int = 0,
+    val sortOrder: DaySortOrder = DaySortOrder.LATEST_FIRST,
     val isLoading: Boolean = true,
     val savedMessage: String? = null,
     val errorMessage: String? = null
@@ -99,6 +105,15 @@ class DayAuditViewModel @Inject constructor(
 
     fun setCountInside(countInside: Boolean) {
         _uiState.value = _uiState.value.copy(countInsideCountry = countInside)
+    }
+
+    fun setSortOrder(sortOrder: DaySortOrder) {
+        val days = _uiState.value.days
+        val sorted = when (sortOrder) {
+            DaySortOrder.OLDEST_FIRST -> days.sortedBy { it.date }
+            DaySortOrder.LATEST_FIRST -> days.sortedByDescending { it.date }
+        }
+        _uiState.value = _uiState.value.copy(sortOrder = sortOrder, days = sorted)
     }
 
     fun markDayOutside(date: LocalDate) {
@@ -197,7 +212,11 @@ class DayAuditViewModel @Inject constructor(
                         manualClassification = overrides[date]
                     )
                 }.toList()
-                _uiState.value = _uiState.value.copy(days = days, isLoading = false)
+                val sorted = when (state.sortOrder) {
+                    DaySortOrder.OLDEST_FIRST -> days.sortedBy { it.date }
+                    DaySortOrder.LATEST_FIRST -> days.sortedByDescending { it.date }
+                }
+                _uiState.value = _uiState.value.copy(days = sorted, isLoading = false)
                 calculateSummary()
             } catch (error: Exception) {
                 if (error is CancellationException) throw error

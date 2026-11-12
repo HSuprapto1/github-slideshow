@@ -22,8 +22,8 @@ android {
         applicationId = "com.roamatlas"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "0.27.0"
+        versionCode = 29
+        versionName = "0.28.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -119,6 +119,7 @@ dependencies {
     
     // Image Loading
     implementation(libs.coil.compose)
+    implementation(libs.androidx.exifinterface)
     
     // Google Auth & Gmail API
     implementation(libs.play.services.auth)
@@ -131,6 +132,7 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
     implementation(libs.kotlinx.coroutines.core)
 
     // Testing

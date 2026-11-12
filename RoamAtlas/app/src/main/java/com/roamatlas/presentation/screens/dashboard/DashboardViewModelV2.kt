@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.journey.JourneyWithFlights
-import com.roamatlas.data.repository.SavedPlaceRepository
+import com.roamatlas.data.photo.CapturedPhotoLocation
+import com.roamatlas.data.photo.PhotoTimelineImporter
+import android.net.Uri
+import java.time.LocalDate
 import com.roamatlas.data.repository.TravelStatisticsRepository
 import com.roamatlas.data.repository.DayOverrideRepository
 import com.roamatlas.data.repository.ManualDayClassification
@@ -13,7 +16,6 @@ import com.roamatlas.domain.model.DayTracker
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.domain.model.TrackerResult
 import com.roamatlas.domain.repository.DayTrackerRepository
-import com.roamatlas.domain.repository.CityRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,11 +23,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
-import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
@@ -38,13 +40,14 @@ data class DashboardUiStateV2(
     val hasData: Boolean = false,
     val showAddMenu: Boolean = false,
     val showAddTrackerDialog: Boolean = false,
-    val showAddPlacePhotoDialog: Boolean = false,
+    val showAddPhotoDialog: Boolean = false,
+    val photoImporting: Boolean = false,
+    val photoImportMessage: String? = null,
+    val todayPointCount: Int = 0,
+    val todayCities: List<String> = emptyList(),
     val editingTracker: DayTracker? = null,
     val trackerPendingDelete: DayTracker? = null,
     val countries: List<Pair<String, String>> = emptyList(),
-    val cities: List<CityRecord> = emptyList(),
-    val placeLabels: Map<String, String> = emptyMap(),
-    val placePhotoCounts: Map<String, Int> = emptyMap(),
     val upcomingJourney: JourneyWithFlights? = null,
     val nowMillis: Long = System.currentTimeMillis(),
     val errorMessage: String? = null
@@ -65,7 +68,7 @@ class DashboardViewModelV2 @Inject constructor(
     private val travelStatisticsRepository: TravelStatisticsRepository,
     private val dayOverrideRepository: DayOverrideRepository,
     private val journeyRepository: JourneyRepository,
-    private val savedPlaceRepository: SavedPlaceRepository
+    private val photoTimelineImporter: PhotoTimelineImporter
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(DashboardUiStateV2())
@@ -102,11 +105,16 @@ class DashboardViewModelV2 @Inject constructor(
                     val upcomingJourney = data.journeys
                         .filter { (it.finalArrivalMillis ?: Long.MIN_VALUE) >= data.now }
                         .minByOrNull { it.firstDepartureMillis ?: Long.MAX_VALUE }
-                    val cities = runCatching { locationRepository.getCities() }.getOrDefault(emptyList())
-                    val placeLabels = runCatching { savedPlaceRepository.getAllLabels() }
-                        .getOrDefault(emptyMap())
-                    val placePhotoCounts = runCatching { savedPlaceRepository.getAllPhotoCounts() }
-                        .getOrDefault(emptyMap())
+                    val today = LocalDate.now()
+                    val todayPoints = runCatching {
+                        locationRepository.getLocationsForLocalDate(today).first()
+                    }.getOrDefault(emptyList())
+                    val todayCount = runCatching {
+                        locationRepository.countForLocalDate(today)
+                    }.getOrDefault(todayPoints.size)
+                    val todayCities = todayPoints.mapNotNull { it.city?.takeIf(String::isNotBlank) }
+                        .distinct()
+                        .take(4)
                     _uiState.value = _uiState.value.copy(
                         travelStats = stats,
                         customTrackers = trackerResults,
@@ -115,9 +123,8 @@ class DashboardViewModelV2 @Inject constructor(
                         isLoading = false,
                         hasData = stats.totalLocationsRecorded > 0 || stats.totalFlights > 0,
                         countries = countries,
-                        cities = cities,
-                        placeLabels = placeLabels,
-                        placePhotoCounts = placePhotoCounts,
+                        todayPointCount = todayCount,
+                        todayCities = todayCities,
                         upcomingJourney = upcomingJourney,
                         nowMillis = data.now,
                         errorMessage = null
@@ -256,38 +263,76 @@ class DashboardViewModelV2 @Inject constructor(
         )
     }
 
-    fun showAddPlacePhotoDialog() {
-        viewModelScope.launch {
-            val cities = runCatching { locationRepository.getCities() }.getOrDefault(emptyList())
-            val placeLabels = runCatching { savedPlaceRepository.getAllLabels() }
-                .getOrDefault(emptyMap())
-            val placePhotoCounts = runCatching { savedPlaceRepository.getAllPhotoCounts() }
-                .getOrDefault(emptyMap())
-            _uiState.value = _uiState.value.copy(
-                showAddMenu = false,
-                showAddPlacePhotoDialog = true,
-                cities = cities,
-                placeLabels = placeLabels,
-                placePhotoCounts = placePhotoCounts
-            )
-        }
+    fun showAddPhotoDialog() {
+        _uiState.value = _uiState.value.copy(
+            showAddMenu = false,
+            showAddPhotoDialog = true,
+            photoImportMessage = null
+        )
     }
 
-    fun hideAddPlacePhotoDialog() {
-        _uiState.value = _uiState.value.copy(showAddPlacePhotoDialog = false)
+    fun hideAddPhotoDialog() {
+        _uiState.value = _uiState.value.copy(
+            showAddPhotoDialog = false,
+            photoImporting = false
+        )
     }
 
-    fun addPhotosToPlace(countryCode: String, city: String, uris: List<String>) {
+    fun importGalleryPhotos(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
-            val existing = savedPlaceRepository.getPhotoUris(countryCode, city)
-            val updated = (existing + uris).distinct()
-            savedPlaceRepository.savePhotoUris(countryCode, city, updated)
+            _uiState.value = _uiState.value.copy(photoImporting = true, photoImportMessage = null)
+            val result = runCatching {
+                photoTimelineImporter.importGalleryPhotos(uris)
+            }.getOrElse {
+                _uiState.value = _uiState.value.copy(
+                    photoImporting = false,
+                    photoImportMessage = it.message ?: "Could not import photos."
+                )
+                return@launch
+            }
+            refreshTodaySummary()
             _uiState.value = _uiState.value.copy(
-                placePhotoCounts = savedPlaceRepository.getAllPhotoCounts(),
-                placeLabels = savedPlaceRepository.getAllLabels()
+                photoImporting = false,
+                photoImportMessage = result.summaryMessage()
             )
         }
+    }
+
+    fun importCapturedPhoto(uri: Uri, capture: CapturedPhotoLocation) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(photoImporting = true, photoImportMessage = null)
+            val result = runCatching {
+                photoTimelineImporter.importCapturedPhoto(uri, capture)
+            }.getOrElse {
+                _uiState.value = _uiState.value.copy(
+                    photoImporting = false,
+                    photoImportMessage = it.message ?: "Could not import photo."
+                )
+                return@launch
+            }
+            refreshTodaySummary()
+            _uiState.value = _uiState.value.copy(
+                photoImporting = false,
+                photoImportMessage = result.summaryMessage()
+            )
+        }
+    }
+
+    private suspend fun refreshTodaySummary() {
+        val today = LocalDate.now()
+        val todayPoints = runCatching {
+            locationRepository.getLocationsForLocalDate(today).first()
+        }.getOrDefault(emptyList())
+        val todayCount = runCatching {
+            locationRepository.countForLocalDate(today)
+        }.getOrDefault(todayPoints.size)
+        _uiState.value = _uiState.value.copy(
+            todayPointCount = todayCount,
+            todayCities = todayPoints.mapNotNull { it.city?.takeIf(String::isNotBlank) }
+                .distinct()
+                .take(4)
+        )
     }
 
     fun editTracker(tracker: DayTracker) {

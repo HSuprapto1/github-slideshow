@@ -316,9 +316,10 @@ fun SettingsScreen(
                     "If you choose Gmail import, RoamAtlas asks Google for read-only Gmail " +
                     "permission and searches booking messages through Google. Imported flight " +
                     "details are then saved locally. RoamAtlas cannot send, edit, or delete email.\n\n" +
-                    "When you attach photos, RoamAtlas accesses only the pictures you select. " +
-                    "Originals and newly taken pictures remain in your phone’s gallery; RoamAtlas " +
-                    "stores links to them instead of duplicate full-size copies.\n\n" +
+                    "When you add photos from Dashboard +, RoamAtlas reads each photo’s GPS and " +
+                    "creates a timeline point with a thumbnail. If a nearby point already exists, " +
+                    "the photo is linked to it instead of adding a duplicate. Gallery originals " +
+                    "stay in your library; thumbnails are stored in RoamAtlas app storage.\n\n" +
                     "Journey sharing uses Android’s sharing menu and sends only the details you " +
                     "choose. Booking references are excluded by default because they can provide " +
                     "access to a reservation when combined with passenger information.\n\n" +
@@ -337,9 +338,9 @@ fun SettingsScreen(
             SettingsInformation.HELP ->
                 "If a number looks wrong, open Days to inspect the location evidence and correct " +
                     "individual dates. Tap a country or city to inspect its recorded dates and map.\n\n" +
-                    "To label a place or add photos: use the Dashboard + button → Place photo, " +
-                    "or Dashboard → Cities → open the place (for example UTAN) → Label this place " +
-                    "and/or Choose photos / Take photo.\n\n" +
+                    "To add photos to the timeline: Dashboard + → Photo to timeline → Load or Take. " +
+                    "Photos without GPS are skipped. Today’s point count is on the Dashboard Today card.\n\n" +
+                    "To label a place name (for example UTAN → Home): Dashboard → Cities → open the place.\n\n" +
                     "For Gmail error code 10, the app’s Google connection is not configured for this " +
                     "signed APK. This is an app setup problem, not a problem with your Gmail password."
         }
