@@ -15,6 +15,7 @@ import javax.inject.Inject
 data class CitiesUiState(
     val cities: List<CityRecord> = emptyList(),
     val customLabels: Map<String, String> = emptyMap(),
+    val photoCounts: Map<String, Int> = emptyMap(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null
 )
@@ -28,11 +29,17 @@ class CitiesViewModel @Inject constructor(
     val uiState: StateFlow<CitiesUiState> = _uiState.asStateFlow()
 
     init {
+        refresh()
+    }
+
+    fun refresh() {
         viewModelScope.launch {
             try {
+                val cities = locationRepository.getCities()
                 _uiState.value = CitiesUiState(
-                    cities = locationRepository.getCities(),
+                    cities = cities,
                     customLabels = savedPlaceRepository.getAllLabels(),
+                    photoCounts = savedPlaceRepository.getAllPhotoCounts(),
                     isLoading = false
                 )
             } catch (error: Exception) {
@@ -47,7 +54,8 @@ class CitiesViewModel @Inject constructor(
     fun refreshLabels() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                customLabels = savedPlaceRepository.getAllLabels()
+                customLabels = savedPlaceRepository.getAllLabels(),
+                photoCounts = savedPlaceRepository.getAllPhotoCounts()
             )
         }
     }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,7 +56,7 @@ fun CitiesScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshLabels()
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -98,6 +99,11 @@ fun CitiesScreen(
                     "${state.cities.size} cities, ranked by recorded days",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Text(
+                    "Open a place to label it (for example rename UTAN to Home) and attach photos from your gallery or camera.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             item {
                 OutlinedTextField(
@@ -130,6 +136,9 @@ fun CitiesScreen(
                     customLabel = state.customLabels[
                         SavedPlaceRepository.placeId(city.countryCode, city.city)
                     ],
+                    photoCount = state.photoCounts[
+                        SavedPlaceRepository.placeId(city.countryCode, city.city)
+                    ] ?: 0,
                     onClick = { onOpenCity(city) }
                 )
             }
@@ -142,6 +151,7 @@ private fun CityListCard(
     rank: Int,
     city: CityRecord,
     customLabel: String?,
+    photoCount: Int,
     onClick: () -> Unit
 ) {
     Card(
@@ -176,6 +186,23 @@ private fun CityListCard(
                 Text(
                     "${formatNumber(city.daysRecorded)} days · ${formatNumber(city.pointCount)} GPS points",
                     style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    if (photoCount > 0) {
+                        "$photoCount photo${if (photoCount == 1) "" else "s"} attached · tap to add more"
+                    } else {
+                        "Tap to label this place or add photos"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            if (photoCount > 0) {
+                Icon(
+                    Icons.Default.PhotoCamera,
+                    contentDescription = "$photoCount photos",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 4.dp)
                 )
             }
             Icon(Icons.Default.ChevronRight, contentDescription = "Open city")

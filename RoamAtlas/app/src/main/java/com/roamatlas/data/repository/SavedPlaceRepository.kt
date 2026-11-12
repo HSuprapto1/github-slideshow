@@ -51,6 +51,13 @@ class SavedPlaceRepository @Inject constructor(
             placeId(parts[0], Uri.decode(parts[1])) to setting.value
         }.toMap()
 
+    suspend fun getAllPhotoCounts(): Map<String, Int> =
+        userSettingsDao.getSettingsWithPrefix(PHOTO_PREFIX).mapNotNull { setting ->
+            val parts = setting.key.removePrefix(PHOTO_PREFIX).split('|', limit = 2)
+            if (parts.size != 2) return@mapNotNull null
+            placeId(parts[0], Uri.decode(parts[1])) to decodePhotoUris(setting.value).size
+        }.toMap()
+
     companion object {
         private const val LABEL_PREFIX = "saved_place_label|"
         private const val PHOTO_PREFIX = "saved_place_photos|"

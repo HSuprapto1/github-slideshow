@@ -3,4 +3,7 @@
     <cache-path
         name="shared_journeys"
         path="shared_journeys/" />
+    <external-files-path
+        name="place_photos"
+        path="place_photos/" />
 </paths>

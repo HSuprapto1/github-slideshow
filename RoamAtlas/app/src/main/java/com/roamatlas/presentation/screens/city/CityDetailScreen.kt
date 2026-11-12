@@ -1,13 +1,16 @@
 package com.roamatlas.presentation.screens.city
 
-import android.content.ContentValues
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -82,6 +85,7 @@ fun CityDetailScreen(
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)
     ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
         uris.forEach { uri ->
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -91,6 +95,11 @@ fun CityDetailScreen(
             }
         }
         viewModel.addPhotos(uris.map(Uri::toString))
+        Toast.makeText(
+            context,
+            "Added ${uris.size} photo${if (uris.size == 1) "" else "s"}",
+            Toast.LENGTH_SHORT
+        ).show()
     }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -98,10 +107,52 @@ fun CityDetailScreen(
         val uri = pendingCameraUri
         if (saved && uri != null) {
             viewModel.addPhotos(listOf(uri.toString()))
+            Toast.makeText(context, "Photo saved to this place", Toast.LENGTH_SHORT).show()
         } else if (uri != null) {
-            runCatching { context.contentResolver.delete(uri, null, null) }
+            runCatching {
+                uri.path?.let { path -> File(path).delete() }
+                // FileProvider content URIs: delete via contentResolver when possible
+                context.contentResolver.delete(uri, null, null)
+            }
         }
         pendingCameraUri = null
+    }
+    fun launchCamera() {
+        val uri = createCameraPhotoUri(context)
+        if (uri == null) {
+            Toast.makeText(
+                context,
+                "Could not open the camera. Try Choose photos instead.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchCamera()
+        } else {
+            Toast.makeText(
+                context,
+                "Camera permission is needed to take a photo.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    fun startTakePhoto() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            launchCamera()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
     }
 
     Scaffold(
@@ -199,8 +250,12 @@ fun CityDetailScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Attach one or more photos to this place. Originals stay in your gallery; " +
-                            "RoamAtlas stores links and thumbnails, not duplicate full-size images.",
+                        if (state.photoUris.isEmpty()) {
+                            "No photos yet. Choose from your gallery or take a new photo for this place."
+                        } else {
+                            "${state.photoUris.size} photo${if (state.photoUris.size == 1) "" else "s"} linked to this place. " +
+                                "Gallery originals stay on your phone; RoamAtlas keeps links, not duplicate full-size files."
+                        },
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -244,12 +299,7 @@ fun CityDetailScreen(
                             Text("Choose photos", modifier = Modifier.padding(start = 6.dp))
                         }
                         OutlinedButton(
-                            onClick = {
-                                createCameraPhotoUri(context)?.let { uri ->
-                                    pendingCameraUri = uri
-                                    cameraLauncher.launch(uri)
-                                }
-                            },
+                            onClick = { startTakePhoto() },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.AddAPhoto, contentDescription = null)
@@ -257,7 +307,8 @@ fun CityDetailScreen(
                         }
                     }
                     Text(
-                        "Photo links are not copied into encrypted backups. Keep the originals in your gallery.",
+                        "Gallery photo links are not copied into encrypted backups. Keep gallery originals. " +
+                            "Photos taken here are stored with RoamAtlas on this phone.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -426,20 +477,17 @@ private fun SavedPlacePhoto(
 }
 
 private fun createCameraPhotoUri(context: android.content.Context): Uri? {
-    val values = ContentValues().apply {
-        put(
-            MediaStore.Images.Media.DISPLAY_NAME,
-            "RoamAtlas_${System.currentTimeMillis()}.jpg"
-        )
-        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/RoamAtlas")
+    return runCatching {
+        val photosDir = File(context.getExternalFilesDir(null), "place_photos").apply {
+            if (!exists()) mkdirs()
         }
-    }
-    return context.contentResolver.insert(
-        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-        values
-    )
+        val photoFile = File(photosDir, "RoamAtlas_${System.currentTimeMillis()}.jpg")
+        FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            photoFile
+        )
+    }.getOrNull()
 }
 
 private fun formatNumber(value: Int): String =
