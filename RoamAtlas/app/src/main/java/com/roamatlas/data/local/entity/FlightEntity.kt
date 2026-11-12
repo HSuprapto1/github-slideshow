@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["departureTimeMillis"]),
         Index(value = ["departureAirportCode"]),
-        Index(value = ["arrivalAirportCode"])
+        Index(value = ["arrivalAirportCode"]),
+        Index(value = ["journeyId"])
     ]
 )
 data class FlightEntity(
@@ -36,7 +37,14 @@ data class FlightEntity(
     val photoUri: String?,
     val source: String,
     val createdAtMillis: Long,
-    val updatedAtMillis: Long
+    val updatedAtMillis: Long,
+    val journeyId: Long? = null,
+    val journeySequence: Int? = null,
+    val estimatedDepartureTimeMillis: Long? = null,
+    val estimatedArrivalTimeMillis: Long? = null,
+    val flightStatus: String? = null,
+    val separateTicketFromPrevious: Boolean? = null,
+    val minimumConnectionMinutes: Int? = null
 )
 
 @Entity(tableName = "trips")

@@ -34,6 +34,8 @@ import com.roamatlas.presentation.screens.map.MapScreenV2
 import com.roamatlas.presentation.screens.flights.AddFlightScreen
 import com.roamatlas.presentation.screens.flights.FlightRemindersScreen
 import com.roamatlas.presentation.screens.flights.ImportFlightsScreen
+import com.roamatlas.presentation.screens.journey.JourneyDetailScreen
+import com.roamatlas.presentation.screens.journey.JourneysScreen
 import com.roamatlas.presentation.screens.timelineimport.LocalTimelineImportScreen
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
 import com.roamatlas.presentation.screens.settings.BackupScreen
@@ -139,6 +141,12 @@ fun RoamAtlasApp(
                         },
                         onOpenCities = {
                             navController.navigate(Screen.Cities.route)
+                        },
+                        onOpenJourneys = {
+                            navController.navigate(Screen.Journeys.route)
+                        },
+                        onOpenJourney = { journeyId ->
+                            navController.navigate(Screen.JourneyDetail.forId(journeyId))
                         }
                     )
                 }
@@ -197,6 +205,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToImportFlights = {
                             navController.navigate(Screen.ImportFlights.route)
+                        },
+                        onNavigateToJourneys = {
+                            navController.navigate(Screen.Journeys.route)
                         },
                         onNavigateToFlightReminders = {
                             navController.navigate(Screen.FlightReminders.route)
@@ -258,6 +269,19 @@ fun RoamAtlasApp(
                         onNavigateBack = {
                             navController.popBackStack()
                         }
+                    )
+                }
+                composable(Screen.Journeys.route) {
+                    JourneysScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenJourney = { journeyId ->
+                            navController.navigate(Screen.JourneyDetail.forId(journeyId))
+                        }
+                    )
+                }
+                composable(Screen.JourneyDetail.route) {
+                    JourneyDetailScreen(
+                        onNavigateBack = { navController.popBackStack() }
                     )
                 }
                 composable(Screen.LocalTimelineImport.route) {

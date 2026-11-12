@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.flights
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.roamatlas.data.airport.Airport
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -118,6 +120,10 @@ fun AddFlightScreen(
                 icon = Icons.Default.FlightTakeoff
             ) {
                 AirportInput(
+                    searchQuery = uiState.departureAirportSearch,
+                    onSearchQueryChange = viewModel::searchDepartureAirport,
+                    suggestions = uiState.departureAirportSuggestions,
+                    onSelectAirport = viewModel::selectDepartureAirport,
                     airportCode = uiState.departureAirportCode,
                     onAirportCodeChange = viewModel::updateDepartureAirportCode,
                     airportName = uiState.departureAirportName,
@@ -146,6 +152,10 @@ fun AddFlightScreen(
                 icon = Icons.Default.FlightLand
             ) {
                 AirportInput(
+                    searchQuery = uiState.arrivalAirportSearch,
+                    onSearchQueryChange = viewModel::searchArrivalAirport,
+                    suggestions = uiState.arrivalAirportSuggestions,
+                    onSelectAirport = viewModel::selectArrivalAirport,
                     airportCode = uiState.arrivalAirportCode,
                     onAirportCodeChange = viewModel::updateArrivalAirportCode,
                     airportName = uiState.arrivalAirportName,
@@ -207,16 +217,16 @@ fun AddFlightScreen(
                     OutlinedTextField(
                         value = uiState.aircraftType,
                         onValueChange = viewModel::updateAircraftType,
-                        label = { Text("Aircraft") },
-                        placeholder = { Text("Boeing 787") },
+                        label = { Text("Aircraft (optional)") },
+                        placeholder = { Text("Add later if known") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = uiState.seatNumber,
                         onValueChange = viewModel::updateSeatNumber,
-                        label = { Text("Seat") },
-                        placeholder = { Text("12A") },
+                        label = { Text("Seat (optional)") },
+                        placeholder = { Text("After check-in") },
                         modifier = Modifier.weight(0.5f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -237,6 +247,11 @@ fun AddFlightScreen(
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Characters
                     )
+                )
+                Text(
+                    "Aircraft and seat can be left empty and updated after online or airport check-in.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
@@ -341,6 +356,10 @@ private fun SectionCard(
 
 @Composable
 private fun AirportInput(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    suggestions: List<Airport>,
+    onSelectAirport: (Airport) -> Unit,
     airportCode: String,
     onAirportCodeChange: (String) -> Unit,
     airportName: String,
@@ -350,6 +369,47 @@ private fun AirportInput(
     countryCode: String,
     onCountryCodeChange: (String) -> Unit
 ) {
+    OutlinedTextField(
+        value = searchQuery,
+        onValueChange = onSearchQueryChange,
+        label = { Text("Find airport") },
+        placeholder = { Text("Search code, airport name, city, or country") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
+    if (suggestions.isNotEmpty()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column {
+                suggestions.forEach { airport ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectAirport(airport) }
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            "${airport.iataCode} · ${airport.name}",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+                        Text(
+                            listOf(airport.city, airport.countryName)
+                                .filter { it.isNotBlank() }
+                                .joinToString(", "),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)

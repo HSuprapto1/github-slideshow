@@ -29,6 +29,15 @@ interface FlightDao {
     
     @Query("SELECT * FROM flights ORDER BY departureTimeMillis DESC")
     fun getAllFlights(): Flow<List<FlightEntity>>
+
+    @Query("SELECT * FROM flights WHERE journeyId = :journeyId ORDER BY journeySequence ASC, departureTimeMillis ASC")
+    fun getFlightsForJourney(journeyId: Long): Flow<List<FlightEntity>>
+
+    @Query("SELECT * FROM flights WHERE journeyId IS NULL ORDER BY departureTimeMillis ASC")
+    fun getUnassignedFlights(): Flow<List<FlightEntity>>
+
+    @Query("UPDATE flights SET journeyId = NULL, journeySequence = NULL WHERE journeyId = :journeyId")
+    suspend fun clearJourney(journeyId: Long)
     
     @Query("SELECT * FROM flights WHERE id = :id")
     suspend fun getFlightById(id: Long): FlightEntity?

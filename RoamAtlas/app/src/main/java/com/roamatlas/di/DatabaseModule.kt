@@ -9,6 +9,7 @@ import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.dao.DayTrackerDao
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.LocationDao
+import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.dao.UserSettingsDao
 import dagger.Module
 import dagger.Provides
@@ -82,6 +83,21 @@ object DatabaseModule {
             )
         }
     }
+
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `journeyId` INTEGER")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `journeySequence` INTEGER")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `estimatedDepartureTimeMillis` INTEGER")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `estimatedArrivalTimeMillis` INTEGER")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `flightStatus` TEXT")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `separateTicketFromPrevious` INTEGER")
+            db.execSQL("ALTER TABLE `flights` ADD COLUMN `minimumConnectionMinutes` INTEGER")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_flights_journeyId` ON `flights` (`journeyId`)"
+            )
+        }
+    }
     
     @Provides
     @Singleton
@@ -91,7 +107,7 @@ object DatabaseModule {
             RoamAtlasDatabase::class.java,
             "roamatlas.db"
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
     
@@ -108,6 +124,11 @@ object DatabaseModule {
     @Provides
     fun provideFlightDao(database: RoamAtlasDatabase): FlightDao {
         return database.flightDao()
+    }
+
+    @Provides
+    fun provideTripDao(database: RoamAtlasDatabase): TripDao {
+        return database.tripDao()
     }
     
     @Provides

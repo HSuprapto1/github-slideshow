@@ -98,6 +98,18 @@ sealed class Screen(
         route = "flight_reminders",
         title = "Flight Reminders"
     )
+
+    data object Journeys : Screen(
+        route = "journeys",
+        title = "Journeys"
+    )
+
+    data object JourneyDetail : Screen(
+        route = "journey/{journeyId}",
+        title = "Journey"
+    ) {
+        fun forId(journeyId: Long) = "journey/$journeyId"
+    }
     
     data object LocalTimelineImport : Screen(
         route = "local_timeline_import",

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -75,6 +76,7 @@ fun SettingsScreen(
     onNavigateToGpsTracking: () -> Unit = {},
     onNavigateToHomeCountry: () -> Unit = {},
     onNavigateToImportFlights: () -> Unit = {},
+    onNavigateToJourneys: () -> Unit = {},
     onNavigateToFlightReminders: () -> Unit = {},
     onNavigateToLocalTimelineImport: () -> Unit = {},
     onNavigateToBackup: () -> Unit = {},
@@ -175,6 +177,13 @@ fun SettingsScreen(
                             "Connected Gmail: $it"
                         } ?: "Gmail not connected · tap to connect or add flights",
                         onClick = onNavigateToImportFlights
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
+                        icon = Icons.Default.Route,
+                        title = "Journeys",
+                        subtitle = "Combine flights, review connections, and share itineraries",
+                        onClick = onNavigateToJourneys
                     )
                     HorizontalDivider()
                     SettingsItem(
@@ -310,6 +319,9 @@ fun SettingsScreen(
                     "When you attach photos, RoamAtlas accesses only the pictures you select. " +
                     "Originals and newly taken pictures remain in your phone’s gallery; RoamAtlas " +
                     "stores links to them instead of duplicate full-size copies.\n\n" +
+                    "Journey sharing uses Android’s sharing menu and sends only the details you " +
+                    "choose. Booking references are excluded by default because they can provide " +
+                    "access to a reservation when combined with passenger information.\n\n" +
                     "Google Maps tiles, Gmail, and any airline-status page require internet access " +
                     "and are governed by those providers’ policies. Encrypted backups are written " +
                     "only to the file location you choose. Android may also include RoamAtlas data " +

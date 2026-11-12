@@ -208,6 +208,20 @@ class ImportFlightsViewModel @Inject constructor(
                                 bookingReference = matchingFlight.bookingReference
                                     ?: flight.bookingReference
                                     ?: itinerary.bookingReference,
+                                estimatedDepartureTimeMillis = flight.departureTimeMillis
+                                    ?.takeIf {
+                                        kotlin.math.abs(
+                                            it - matchingFlight.departureTimeMillis
+                                        ) >= 5 * 60_000L
+                                    }
+                                    ?: matchingFlight.estimatedDepartureTimeMillis,
+                                estimatedArrivalTimeMillis = flight.arrivalTimeMillis
+                                    ?.takeIf {
+                                        kotlin.math.abs(
+                                            it - matchingFlight.arrivalTimeMillis
+                                        ) >= 5 * 60_000L
+                                    }
+                                    ?: matchingFlight.estimatedArrivalTimeMillis,
                                 notes = mergeEmailDetails(
                                     matchingFlight.notes,
                                     flight.departureGate,

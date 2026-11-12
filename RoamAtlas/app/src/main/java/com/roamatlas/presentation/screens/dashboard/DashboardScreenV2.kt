@@ -62,6 +62,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.roamatlas.domain.model.CountryVisitStats
 import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
+import com.roamatlas.data.journey.ConnectionRisk
+import com.roamatlas.data.journey.JourneyWithFlights
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.text.NumberFormat
@@ -74,6 +76,8 @@ fun DashboardScreenV2(
     onOpenCountry: (String) -> Unit = {},
     onOpenCountries: () -> Unit = {},
     onOpenCities: () -> Unit = {},
+    onOpenJourneys: () -> Unit = {},
+    onOpenJourney: (Long) -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -147,7 +151,17 @@ fun DashboardScreenV2(
                 }
                 
                 item {
-                    FlightStatisticsSection(uiState.travelStats)
+                    uiState.upcomingJourney?.let {
+                        UpcomingJourneyCard(
+                            journey = it,
+                            nowMillis = uiState.nowMillis,
+                            onClick = { onOpenJourney(it.journey.id) }
+                        )
+                    }
+                }
+
+                item {
+                    FlightStatisticsSection(uiState.travelStats, onOpenJourneys)
                 }
                 
                 if (uiState.homeCountryCode != null) {
@@ -566,7 +580,88 @@ private fun TravelOverviewSection(
 }
 
 @Composable
-private fun FlightStatisticsSection(stats: TravelStatistics) {
+private fun UpcomingJourneyCard(
+    journey: JourneyWithFlights,
+    nowMillis: Long,
+    onClick: () -> Unit
+) {
+    val firstDeparture = journey.firstDepartureMillis
+    val nextFlight = journey.orderedFlights.firstOrNull {
+        (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > nowMillis
+    }
+    val countdownTarget = if (
+        firstDeparture != null &&
+        nowMillis < firstDeparture
+    ) {
+        firstDeparture
+    } else {
+        nextFlight?.estimatedDepartureTimeMillis ?: nextFlight?.departureTimeMillis
+    }
+    val riskyConnection = journey.connections.firstOrNull {
+        it.risk != ConnectionRisk.COMFORTABLE
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = if (riskyConnection?.risk == ConnectionRisk.BELOW_RECOMMENDED) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text("Upcoming journey", style = MaterialTheme.typography.labelLarge)
+            Text(
+                journey.journey.name,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (journey.flights.isNotEmpty()) {
+                Text(
+                    journey.orderedFlights.joinToString(" → ") { it.departureAirportCode } +
+                        " → ${journey.orderedFlights.last().arrivalAirportCode}",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            countdownTarget?.let {
+                Text(
+                    "Next departure in ${formatJourneyDuration((it - nowMillis) / 60_000)}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                "${journey.flights.size} flights · ${formatJourneyDuration(journey.totalJourneyMinutes)} total · " +
+                    "${formatJourneyDuration(journey.totalTransitMinutes)} transit"
+            )
+            riskyConnection?.let {
+                Text(
+                    if (it.risk == ConnectionRisk.BELOW_RECOMMENDED) {
+                        "Connection below recommended minimum—review alternatives with the airline."
+                    } else {
+                        "One connection may be tight."
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                "Tap for flight details, transit times, delays, route map, and sharing.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun FlightStatisticsSection(
+    stats: TravelStatistics,
+    onOpenJourneys: () -> Unit
+) {
     Column {
         Text(
             text = "Flight Statistics",
@@ -577,7 +672,7 @@ private fun FlightStatisticsSection(stats: TravelStatistics) {
         Spacer(modifier = Modifier.height(12.dp))
         
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenJourneys)
         ) {
             Column(
                 modifier = Modifier.padding(16.dp)
@@ -646,6 +741,12 @@ private fun FlightStatisticsSection(stats: TravelStatistics) {
                         }
                     }
                 }
+                Text(
+                    "Tap to combine flights into named journeys and review connections.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
             }
         }
     }
@@ -1043,6 +1144,18 @@ private fun formatDuration(minutes: Int): String {
         hours >= 24 -> "${hours / 24}d ${hours % 24}h"
         else -> "${hours}h"
     }
+}
+
+private fun formatJourneyDuration(totalMinutes: Long): String {
+    val safe = totalMinutes.coerceAtLeast(0)
+    val days = safe / 1440
+    val hours = safe % 1440 / 60
+    val minutes = safe % 60
+    return buildList {
+        if (days > 0) add("${days}d")
+        if (hours > 0 || days > 0) add("${hours}h")
+        add("${minutes}m")
+    }.joinToString(" ")
 }
 
 private fun formatDashboardDate(date: java.time.LocalDate): String =

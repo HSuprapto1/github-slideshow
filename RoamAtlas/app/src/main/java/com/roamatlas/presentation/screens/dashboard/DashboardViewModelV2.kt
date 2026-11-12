@@ -2,6 +2,8 @@ package com.roamatlas.presentation.screens.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.roamatlas.data.journey.JourneyRepository
+import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.repository.TravelStatisticsRepository
 import com.roamatlas.data.repository.DayOverrideRepository
 import com.roamatlas.data.repository.ManualDayClassification
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.time.LocalDate
@@ -35,7 +38,17 @@ data class DashboardUiStateV2(
     val editingTracker: DayTracker? = null,
     val trackerPendingDelete: DayTracker? = null,
     val countries: List<Pair<String, String>> = emptyList(),
+    val upcomingJourney: JourneyWithFlights? = null,
+    val nowMillis: Long = System.currentTimeMillis(),
     val errorMessage: String? = null
+)
+
+private data class DashboardData(
+    val stats: TravelStatistics,
+    val trackers: List<DayTracker>,
+    val homeCountryCode: String?,
+    val journeys: List<JourneyWithFlights>,
+    val now: Long
 )
 
 @HiltViewModel
@@ -43,14 +56,22 @@ class DashboardViewModelV2 @Inject constructor(
     private val locationRepository: LocationRepository,
     private val dayTrackerRepository: DayTrackerRepository,
     private val travelStatisticsRepository: TravelStatisticsRepository,
-    private val dayOverrideRepository: DayOverrideRepository
+    private val dayOverrideRepository: DayOverrideRepository,
+    private val journeyRepository: JourneyRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(DashboardUiStateV2())
     val uiState: StateFlow<DashboardUiStateV2> = _uiState.asStateFlow()
+    private val clock = MutableStateFlow(System.currentTimeMillis())
     
     init {
         loadDashboardData()
+        viewModelScope.launch {
+            while (true) {
+                delay(60_000)
+                clock.value = System.currentTimeMillis()
+            }
+        }
     }
     
     private fun loadDashboardData() {
@@ -59,20 +80,30 @@ class DashboardViewModelV2 @Inject constructor(
                 combine(
                     travelStatisticsRepository.getTravelStatistics(),
                     dayTrackerRepository.getAllTrackers(),
-                    travelStatisticsRepository.getHomeCountryCodeFlow()
-                ) { stats, trackers, homeCountryCode ->
-                    Triple(stats, trackers, homeCountryCode)
-                }.collectLatest { (stats, trackers, homeCountryCode) ->
+                    travelStatisticsRepository.getHomeCountryCodeFlow(),
+                    journeyRepository.getJourneys(),
+                    clock
+                ) { stats, trackers, homeCountryCode, journeys, now ->
+                    DashboardData(stats, trackers, homeCountryCode, journeys, now)
+                }.collectLatest { data ->
+                    val stats = data.stats
+                    val trackers = data.trackers
+                    val homeCountryCode = data.homeCountryCode
                     val trackerResults = calculateTrackerResults(trackers)
                     val countries = TravelStatisticsRepository.getAllCountries()
+                    val upcomingJourney = data.journeys
+                        .filter { (it.finalArrivalMillis ?: Long.MIN_VALUE) >= data.now }
+                        .minByOrNull { it.firstDepartureMillis ?: Long.MAX_VALUE }
                     _uiState.value = _uiState.value.copy(
                         travelStats = stats,
                         customTrackers = trackerResults,
                         homeCountryCode = homeCountryCode,
                         homeCountryName = countries.firstOrNull { it.first == homeCountryCode }?.second,
                         isLoading = false,
-                        hasData = stats.totalLocationsRecorded > 0,
+                        hasData = stats.totalLocationsRecorded > 0 || stats.totalFlights > 0,
                         countries = countries,
+                        upcomingJourney = upcomingJourney,
+                        nowMillis = data.now,
                         errorMessage = null
                     )
                 }
