@@ -82,10 +82,17 @@ fun ImportFlightsScreen(
                 .getResult(ApiException::class.java)
             viewModel.handleSignInResult(account)
         } catch (error: Exception) {
-            val detail = (error as? ApiException)?.statusCode?.let { "error code $it" }
-                ?: error.message
-                ?: if (result.resultCode == Activity.RESULT_CANCELED) "sign-in was cancelled"
-                else "unknown sign-in error"
+            val statusCode = (error as? ApiException)?.statusCode
+            val detail = when {
+                statusCode == 10 ->
+                    "Google rejected this app’s connection setup (code 10). " +
+                        "Your Gmail account and password are not the problem. " +
+                        "This APK must be registered correctly by the RoamAtlas developer."
+                result.resultCode == Activity.RESULT_CANCELED ->
+                    "sign-in was cancelled"
+                statusCode != null -> "Google sign-in error code $statusCode"
+                else -> error.message ?: "unknown sign-in error"
+            }
             viewModel.handleSignInFailure(detail)
         }
     }

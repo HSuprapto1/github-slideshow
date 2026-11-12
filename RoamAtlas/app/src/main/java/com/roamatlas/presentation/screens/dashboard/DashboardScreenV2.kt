@@ -60,7 +60,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.roamatlas.domain.model.CountryVisitStats
+import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -69,6 +72,7 @@ import java.util.Locale
 fun DashboardScreenV2(
     onSelectHomeCountry: () -> Unit = {},
     onOpenCountry: (String) -> Unit = {},
+    onOpenCountries: () -> Unit = {},
     onOpenCities: () -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
@@ -131,7 +135,15 @@ fun DashboardScreenV2(
                 }
 
                 item {
-                    TravelOverviewSection(uiState.travelStats, onOpenCities)
+                    DataCoverageSection(uiState.travelStats)
+                }
+
+                item {
+                    TravelOverviewSection(
+                        stats = uiState.travelStats,
+                        onOpenCountries = onOpenCountries,
+                        onOpenCities = onOpenCities
+                    )
                 }
                 
                 item {
@@ -146,6 +158,14 @@ fun DashboardScreenV2(
                             homeCountry = uiState.homeCountryName ?: uiState.homeCountryCode!!
                         )
                     }
+                }
+
+                item {
+                    TravelFactsSection(
+                        stats = uiState.travelStats,
+                        homeCountryCode = uiState.homeCountryCode,
+                        homeCountryName = uiState.homeCountryName
+                    )
                 }
                 
                 if (uiState.travelStats.countriesVisitedList.isNotEmpty()) {
@@ -334,8 +354,122 @@ private fun GetStartedItem(number: String, text: String) {
 }
 
 @Composable
+private fun DataCoverageSection(stats: TravelStatistics) {
+    val first = stats.earliestRecordDate
+    val last = stats.latestRecordDate
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                "What these numbers cover",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "${stats.totalDaysTracked} days have location records",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (first != null && last != null) {
+                Text(
+                    "From ${formatDashboardDate(first)} to ${formatDashboardDate(last)}"
+                )
+            }
+            Text(
+                "The country and city totals below use this same period. Days without a location record are not counted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TravelFactsSection(
+    stats: TravelStatistics,
+    homeCountryCode: String?,
+    homeCountryName: String?
+) {
+    val first = stats.earliestRecordDate
+    val last = stats.latestRecordDate
+    val spanYears = if (first != null && last != null) {
+        last.year - first.year + 1
+    } else 0
+    val classifiedHomeDays = stats.daysInsideHomeCountry + stats.daysOutsideHomeCountry
+    val abroadPercent = if (classifiedHomeDays > 0) {
+        stats.daysOutsideHomeCountry * 100 / classifiedHomeDays
+    } else null
+    val destinationsBeyondHome = stats.countriesVisitedList.count {
+        it.countryCode != homeCountryCode &&
+            it.classification != CountryVisitClassification.TRANSIT
+    }
+    val firstCountry = stats.countriesVisitedList
+        .filter { it.firstVisit != null }
+        .minByOrNull { it.firstVisit!! }
+    val latestCountry = stats.countriesVisitedList
+        .filter { it.lastVisit != null }
+        .maxByOrNull { it.lastVisit!! }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "Interesting facts",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (spanYears > 0) {
+                    FactLine("Your records span $spanYears calendar ${if (spanYears == 1) "year" else "years"}.")
+                }
+                if (homeCountryCode != null) {
+                    FactLine(
+                        "Beyond ${homeCountryName ?: homeCountryCode}, records appear in " +
+                            "$destinationsBeyondHome other ${if (destinationsBeyondHome == 1) "country" else "countries"}."
+                    )
+                }
+                abroadPercent?.let {
+                    FactLine(
+                        "$it% of days with home/abroad evidence are marked outside " +
+                            "${homeCountryName ?: homeCountryCode}."
+                    )
+                }
+                firstCountry?.let {
+                    FactLine(
+                        "First country record: ${it.countryName} on ${formatDashboardDate(it.firstVisit!!)}."
+                    )
+                }
+                latestCountry?.let {
+                    FactLine(
+                        "Latest country record: ${it.countryName} on ${formatDashboardDate(it.lastVisit!!)}."
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FactLine(text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text("•", fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
 private fun TravelOverviewSection(
     stats: TravelStatistics,
+    onOpenCountries: () -> Unit,
     onOpenCities: () -> Unit
 ) {
     Column {
@@ -356,7 +490,8 @@ private fun TravelOverviewSection(
                 icon = Icons.Default.Public,
                 value = stats.totalCountriesVisited.toString(),
                 label = "Countries",
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                onClick = onOpenCountries
             )
             StatCard(
                 modifier = Modifier.weight(1f),
@@ -893,3 +1028,6 @@ private fun formatDuration(minutes: Int): String {
         else -> "${hours}h"
     }
 }
+
+private fun formatDashboardDate(date: java.time.LocalDate): String =
+    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))

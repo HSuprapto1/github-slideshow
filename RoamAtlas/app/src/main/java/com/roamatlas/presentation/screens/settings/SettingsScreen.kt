@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CloudUpload
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -56,6 +60,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.roamatlas.BuildConfig
+
+private enum class SettingsInformation {
+    PRIVACY,
+    ABOUT,
+    HELP
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +82,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var informationDialog by remember { mutableStateOf<SettingsInformation?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -200,8 +212,8 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.PrivacyTip,
                         title = "Privacy Policy",
-                        subtitle = "Local-first, no cloud uploads",
-                        onClick = { /* TODO */ }
+                        subtitle = "How RoamAtlas handles your information",
+                        onClick = { informationDialog = SettingsInformation.PRIVACY }
                     )
                     HorizontalDivider()
                     SettingsItem(
@@ -230,15 +242,15 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.Info,
                         title = "About RoamAtlas",
-                        subtitle = "Version 0.20.0",
-                        onClick = { /* TODO */ }
+                        subtitle = "Version ${BuildConfig.VERSION_NAME}",
+                        onClick = { informationDialog = SettingsInformation.ABOUT }
                     )
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.AutoMirrored.Filled.HelpOutline,
                         title = "Help & Feedback",
                         subtitle = "Report issues, request features",
-                        onClick = { /* TODO */ }
+                        onClick = { informationDialog = SettingsInformation.HELP }
                     )
                 }
             }
@@ -255,7 +267,7 @@ fun SettingsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "RoamAtlas v0.1.0",
+                            text = "RoamAtlas v${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -279,6 +291,54 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
+    }
+
+    informationDialog?.let { information ->
+        val title = when (information) {
+            SettingsInformation.PRIVACY -> "Privacy Policy"
+            SettingsInformation.ABOUT -> "About RoamAtlas"
+            SettingsInformation.HELP -> "Help & Feedback"
+        }
+        val message = when (information) {
+            SettingsInformation.PRIVACY ->
+                "Your Timeline locations, counters, manual choices, and imported flight details " +
+                    "are stored in RoamAtlas on this device. RoamAtlas does not upload your " +
+                    "Timeline to a RoamAtlas server.\n\n" +
+                    "If you choose Gmail import, RoamAtlas asks Google for read-only Gmail " +
+                    "permission and searches booking messages through Google. Imported flight " +
+                    "details are then saved locally. RoamAtlas cannot send, edit, or delete email.\n\n" +
+                    "Google Maps tiles, Gmail, and any airline-status page require internet access " +
+                    "and are governed by those providers’ policies. Encrypted backups are written " +
+                    "only to the file location you choose. You can disconnect Gmail at any time."
+            SettingsInformation.ABOUT ->
+                "RoamAtlas ${BuildConfig.VERSION_NAME}\n\n" +
+                    "A local-first personal travel-history app. It turns your Google Timeline or " +
+                    "phone GPS records into transparent country, city, map, day, and home-versus-" +
+                    "abroad summaries. You remain in control of manual day, flight, gate, and " +
+                    "terminal corrections.\n\n" +
+                    "Country and city totals reflect only dates that contain usable location records."
+            SettingsInformation.HELP ->
+                "If a number looks wrong, open Days to inspect the location evidence and correct " +
+                    "individual dates. Tap a country or city to inspect its recorded dates and map.\n\n" +
+                    "For Gmail error code 10, the app’s Google connection is not configured for this " +
+                    "signed APK. This is an app setup problem, not a problem with your Gmail password."
+        }
+        AlertDialog(
+            onDismissRequest = { informationDialog = null },
+            title = { Text(title) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                ) {
+                    Text(message)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { informationDialog = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

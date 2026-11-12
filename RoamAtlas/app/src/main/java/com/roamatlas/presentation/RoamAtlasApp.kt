@@ -25,6 +25,7 @@ import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
 import com.roamatlas.presentation.screens.country.CountryDetailScreen
+import com.roamatlas.presentation.screens.country.CountriesScreen
 import com.roamatlas.presentation.screens.city.CitiesScreen
 import com.roamatlas.presentation.screens.city.CityDetailScreen
 import com.roamatlas.presentation.screens.days.DayAuditScreen
@@ -133,6 +134,9 @@ fun RoamAtlasApp(
                         onOpenCountry = { countryCode ->
                             navController.navigate(Screen.CountryDetail.forCode(countryCode))
                         },
+                        onOpenCountries = {
+                            navController.navigate(Screen.Countries.route)
+                        },
                         onOpenCities = {
                             navController.navigate(Screen.Cities.route)
                         }
@@ -171,6 +175,9 @@ fun RoamAtlasApp(
                     StatisticsScreen(
                         onOpenCountry = { countryCode ->
                             navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        },
+                        onOpenCountries = {
+                            navController.navigate(Screen.Countries.route)
                         },
                         onOpenCities = {
                             navController.navigate(Screen.Cities.route)
@@ -273,6 +280,14 @@ fun RoamAtlasApp(
                             navController.navigate(
                                 Screen.Map.forCountryDate(date.toString(), countryCode)
                             )
+                        }
+                    )
+                }
+                composable(Screen.Countries.route) {
+                    CountriesScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
                         }
                     )
                 }

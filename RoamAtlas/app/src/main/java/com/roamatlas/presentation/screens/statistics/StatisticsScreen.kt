@@ -43,6 +43,7 @@ import com.roamatlas.domain.model.CountryVisitClassification
 @Composable
 fun StatisticsScreen(
     onOpenCountry: (String) -> Unit = {},
+    onOpenCountries: () -> Unit = {},
     onOpenCities: () -> Unit = {},
     viewModel: StatisticsViewModel = hiltViewModel()
 ) {
@@ -108,7 +109,8 @@ fun StatisticsScreen(
                         icon = Icons.Default.Public,
                         value = statistics.totalCountriesVisited.toString(),
                         label = "Countries",
-                        subtitle = "visited"
+                        subtitle = "visited",
+                        onClick = onOpenCountries
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),

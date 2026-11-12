@@ -126,6 +126,11 @@ sealed class Screen(
         title = "Cities Explored"
     )
 
+    data object Countries : Screen(
+        route = "countries",
+        title = "Countries Recorded"
+    )
+
     data object CityDetail : Screen(
         route = "city/{country}/{city}",
         title = "City History"
