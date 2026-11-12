@@ -313,7 +313,11 @@ private fun UpcomingFlightCard(
             flight.seatNumber?.takeIf { it.isNotBlank() }?.let { Text("Seat: $it") }
             val gate = noteValue(flight.notes, "Departure gate")
             val terminal = noteValue(flight.notes, "Departure terminal")
+            val automaticGate = noteValue(flight.notes, "Automatic departure gate")
+            val automaticTerminal = noteValue(flight.notes, "Automatic departure terminal")
             val airportDetailsSource = noteValue(flight.notes, "Airport details source")
+            val gateConflict = valuesDiffer(gate, automaticGate)
+            val terminalConflict = valuesDiffer(terminal, automaticTerminal)
             Text(
                 buildString {
                     if (terminal != null) append("Terminal $terminal • ")
@@ -327,6 +331,51 @@ private fun UpcomingFlightCard(
                     ?: "Gate information is shown only when found in your booking email or entered from the airport board.",
                 style = MaterialTheme.typography.labelSmall
             )
+            if (automaticGate != null || automaticTerminal != null) {
+                Text(
+                    buildString {
+                        append("Latest automatic information: ")
+                        append(
+                            listOfNotNull(
+                                automaticTerminal?.let { "Terminal $it" },
+                                automaticGate?.let { "Gate $it" }
+                            ).joinToString(" • ")
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (gateConflict || terminalConflict) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Airport information does not match",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        if (gateConflict) {
+                            Text("You entered Gate $gate. Automatic information says Gate $automaticGate.")
+                        }
+                        if (terminalConflict) {
+                            Text(
+                                "You entered Terminal $terminal. Automatic information says Terminal $automaticTerminal."
+                            )
+                        }
+                        Text(
+                            "Please find the nearest airport departure board and check again.",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
             OutlinedButton(
                 onClick = {
                     terminalInput = terminal.orEmpty()
@@ -401,6 +450,11 @@ private fun noteValue(notes: String?, label: String): String? =
         ?.substringAfter(':')
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
+
+private fun valuesDiffer(manual: String?, automatic: String?): Boolean =
+    !manual.isNullOrBlank() &&
+        !automatic.isNullOrBlank() &&
+        !manual.equals(automatic, ignoreCase = true)
 
 @Composable
 private fun SectionHeader(

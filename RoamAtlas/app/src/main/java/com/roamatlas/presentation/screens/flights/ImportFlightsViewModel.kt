@@ -183,6 +183,7 @@ class ImportFlightsViewModel @Inject constructor(
                 var importedCount = 0
                 var matchedCount = 0
                 var skippedCount = 0
+                var airportDetailConflictCount = 0
                 val existingFlights = flightDao.getAllFlights().first().toMutableList()
                 
                 for (itinerary in selectedItineraries) {
@@ -190,6 +191,15 @@ class ImportFlightsViewModel @Inject constructor(
                         val now = System.currentTimeMillis()
                         val matchingFlight = findMatchingFlight(existingFlights, flight, now)
                         if (matchingFlight != null) {
+                            if (
+                                hasAirportDetailConflict(
+                                    matchingFlight.notes,
+                                    flight.departureGate,
+                                    flight.departureTerminal
+                                )
+                            ) {
+                                airportDetailConflictCount++
+                            }
                             val merged = matchingFlight.copy(
                                 flightNumber = matchingFlight.flightNumber ?: flight.flightNumber,
                                 airline = matchingFlight.airline ?: flight.airline ?: itinerary.airline,
@@ -271,6 +281,12 @@ class ImportFlightsViewModel @Inject constructor(
                     if (skippedCount > 0) {
                         add("$skippedCount skipped because the email had no travel date; add it manually")
                     }
+                    if (airportDetailConflictCount > 0) {
+                        add(
+                            "$airportDetailConflictCount gate or terminal update differs from your manual entry. " +
+                                "Open Flight Reminders and check the nearest airport board"
+                        )
+                    }
                 }
                 
                 _uiState.update { 
@@ -341,7 +357,10 @@ class ImportFlightsViewModel @Inject constructor(
             )
         }
         val additions = buildList {
-            if (!hasManualAirportDetails) {
+            if (hasManualAirportDetails) {
+                gate?.let { add("Automatic departure gate: $it") }
+                terminal?.let { add("Automatic departure terminal: $it") }
+            } else {
                 gate?.let { add("Departure gate: $it") }
                 terminal?.let { add("Departure terminal: $it") }
             }
@@ -356,6 +375,32 @@ class ImportFlightsViewModel @Inject constructor(
         }
         return lines.joinToString("\n")
     }
+
+    private fun hasAirportDetailConflict(
+        existingNotes: String?,
+        automaticGate: String?,
+        automaticTerminal: String?
+    ): Boolean {
+        val hasManualDetails = noteValue(existingNotes, "Airport details source")
+            ?.equals("Manually entered from airport board", ignoreCase = true) == true
+        if (!hasManualDetails) return false
+        val manualGate = noteValue(existingNotes, "Departure gate")
+        val manualTerminal = noteValue(existingNotes, "Departure terminal")
+        return valuesDiffer(manualGate, automaticGate) ||
+            valuesDiffer(manualTerminal, automaticTerminal)
+    }
+
+    private fun valuesDiffer(manual: String?, automatic: String?): Boolean =
+        !manual.isNullOrBlank() &&
+            !automatic.isNullOrBlank() &&
+            !manual.equals(automatic, ignoreCase = true)
+
+    private fun noteValue(notes: String?, label: String): String? =
+        notes?.lineSequence()
+            ?.firstOrNull { it.startsWith("$label:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
     
     fun clearError() {
         _uiState.update { it.copy(error = null) }

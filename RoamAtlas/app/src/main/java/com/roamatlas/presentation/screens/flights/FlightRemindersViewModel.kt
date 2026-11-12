@@ -118,10 +118,20 @@ class FlightRemindersViewModel @Inject constructor(
     fun updateAirportBoardDetails(flightId: Long, terminal: String, gate: String) {
         viewModelScope.launch {
             val flight = flightDao.getFlightById(flightId) ?: return@launch
+            val hasManualSource = noteValue(flight.notes, "Airport details source")
+                ?.equals("Manually entered from airport board", ignoreCase = true) == true
+            val automaticTerminal = noteValue(flight.notes, "Automatic departure terminal")
+                ?: noteValue(flight.notes, "Departure terminal")
+                    .takeIf { flight.source.contains("EMAIL") && !hasManualSource }
+            val automaticGate = noteValue(flight.notes, "Automatic departure gate")
+                ?: noteValue(flight.notes, "Departure gate")
+                    .takeIf { flight.source.contains("EMAIL") && !hasManualSource }
             val updatedNotes = replaceAirportDetail(
                 notes = flight.notes,
                 terminal = terminal.trim().uppercase(),
-                gate = gate.trim().uppercase()
+                gate = gate.trim().uppercase(),
+                automaticTerminal = automaticTerminal,
+                automaticGate = automaticGate
             )
             flightDao.update(
                 flight.copy(
@@ -132,20 +142,40 @@ class FlightRemindersViewModel @Inject constructor(
         }
     }
 
-    private fun replaceAirportDetail(notes: String?, terminal: String, gate: String): String {
+    private fun replaceAirportDetail(
+        notes: String?,
+        terminal: String,
+        gate: String,
+        automaticTerminal: String?,
+        automaticGate: String?
+    ): String {
         val retained = notes.orEmpty().lineSequence()
             .filter { line ->
                 !line.startsWith("Departure terminal:", ignoreCase = true) &&
                     !line.startsWith("Departure gate:", ignoreCase = true) &&
+                    !line.startsWith("Automatic departure terminal:", ignoreCase = true) &&
+                    !line.startsWith("Automatic departure gate:", ignoreCase = true) &&
                     !line.startsWith("Airport details source:", ignoreCase = true)
             }
             .filter { it.isNotBlank() }
             .toMutableList()
-        if (terminal.isNotBlank()) retained.add("Departure terminal: $terminal")
-        if (gate.isNotBlank()) retained.add("Departure gate: $gate")
         if (terminal.isNotBlank() || gate.isNotBlank()) {
+            if (terminal.isNotBlank()) retained.add("Departure terminal: $terminal")
+            if (gate.isNotBlank()) retained.add("Departure gate: $gate")
+            automaticTerminal?.let { retained.add("Automatic departure terminal: $it") }
+            automaticGate?.let { retained.add("Automatic departure gate: $it") }
             retained.add("Airport details source: Manually entered from airport board")
+        } else {
+            automaticTerminal?.let { retained.add("Departure terminal: $it") }
+            automaticGate?.let { retained.add("Departure gate: $it") }
         }
         return retained.joinToString("\n")
     }
+
+    private fun noteValue(notes: String?, label: String): String? =
+        notes?.lineSequence()
+            ?.firstOrNull { it.startsWith("$label:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
 }

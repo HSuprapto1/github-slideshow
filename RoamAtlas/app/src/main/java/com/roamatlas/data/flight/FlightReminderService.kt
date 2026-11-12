@@ -247,8 +247,18 @@ class FlightReminderService : Service() {
             flight.departureTimeMillis - previousFlight.arrivalTimeMillis in
                 0..TimeUnit.HOURS.toMillis(24)
         val gate = noteValue(flight.notes, "Departure gate")
-        val gateText = gate?.let { " Gate $it." }
-            ?: " Gate not available; check the airline or airport display."
+        val automaticGate = noteValue(flight.notes, "Automatic departure gate")
+        val gateConflict = !gate.isNullOrBlank() &&
+            !automaticGate.isNullOrBlank() &&
+            !gate.equals(automaticGate, ignoreCase = true)
+        val gateText = when {
+            gateConflict ->
+                " You entered Gate $gate, but automatic information says Gate $automaticGate. " +
+                    "Check the nearest airport board again."
+            gate != null -> " Gate $gate."
+            automaticGate != null -> " Gate $automaticGate."
+            else -> " Gate not available; check the airline or airport display."
+        }
         
         when {
             // User is already near airport - all good
