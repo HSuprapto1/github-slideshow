@@ -104,6 +104,33 @@ fun AddPhotoToTimelineDialog(
         if (uris.isNotEmpty()) onImportGallery(uris)
     }
 
+    fun launchGalleryPicker() {
+        photoPicker.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+    }
+
+    val mediaLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Continue even if denied; EXIF/FileDescriptor may still work for some URIs.
+        launchGalleryPicker()
+    }
+
+    fun startLoadPhotos() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_MEDIA_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                mediaLocationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                return
+            }
+        }
+        launchGalleryPicker()
+    }
+
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { saved ->
@@ -223,13 +250,7 @@ fun AddPhotoToTimelineDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = {
-                                photoPicker.launch(
-                                    PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly
-                                    )
-                                )
-                            },
+                            onClick = { startLoadPhotos() },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.PhotoLibrary, contentDescription = null)

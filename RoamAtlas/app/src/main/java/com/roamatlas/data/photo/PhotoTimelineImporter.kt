@@ -1,11 +1,13 @@
 package com.roamatlas.data.photo
 
+import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import com.roamatlas.data.geo.OfflineGeoResolver
@@ -39,7 +41,12 @@ data class PhotoImportResult(
                 add("linked $attachedToExisting photo${if (attachedToExisting == 1) "" else "s"} to existing points")
             }
             if (skippedDuplicate > 0) add("skipped $skippedDuplicate already imported")
-            if (skippedNoGps > 0) add("skipped $skippedNoGps without GPS")
+            if (skippedNoGps > 0) {
+                add(
+                    "skipped $skippedNoGps with no readable GPS " +
+                        "(Gallery may show location, but RoamAtlas could not read it from the file)"
+                )
+            }
             if (failed > 0) add("failed $failed")
         }
         return if (parts.isEmpty()) {
@@ -56,6 +63,14 @@ data class CapturedPhotoLocation(
     val accuracyMeters: Float? = null,
     val altitudeMeters: Double? = null,
     val timestampMillis: Long = System.currentTimeMillis()
+)
+
+private data class ResolvedPhotoLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val altitudeMeters: Double? = null,
+    val timestampMillis: Long? = null,
+    val source: String
 )
 
 @Singleton
@@ -105,17 +120,24 @@ class PhotoTimelineImporter @Inject constructor(
             val sourceId = "photo_${stablePhotoId(uri)}"
             locationDao.getByOriginalSourceId(sourceId)?.let { return ImportOutcome.DUPLICATE }
 
-            val exif = openExif(uri)
-            val latLon = exif?.latLong
-            val latitude = latLon?.getOrNull(0) ?: fallbackLocation?.latitude
-            val longitude = latLon?.getOrNull(1) ?: fallbackLocation?.longitude
-            if (latitude == null || longitude == null) return ImportOutcome.NO_GPS
+            val resolved = resolvePhotoLocation(uri)
+                ?: fallbackLocation?.let {
+                    ResolvedPhotoLocation(
+                        latitude = it.latitude,
+                        longitude = it.longitude,
+                        altitudeMeters = it.altitudeMeters,
+                        timestampMillis = it.timestampMillis,
+                        source = "device_gps"
+                    )
+                }
+            if (resolved == null) return ImportOutcome.NO_GPS
 
-            val timestampMillis = readExifTimestamp(exif)
+            val latitude = resolved.latitude
+            val longitude = resolved.longitude
+            val timestampMillis = resolved.timestampMillis
                 ?: fallbackLocation?.timestampMillis
                 ?: System.currentTimeMillis()
-            val altitude = exif?.getAltitude(Double.NaN)?.takeIf { !it.isNaN() }
-                ?: fallbackLocation?.altitudeMeters
+            val altitude = resolved.altitudeMeters ?: fallbackLocation?.altitudeMeters
             val accuracy = fallbackLocation?.accuracyMeters
 
             val thumbnailUri = createThumbnail(uri, sourceId) ?: return ImportOutcome.FAILED
@@ -126,13 +148,15 @@ class PhotoTimelineImporter @Inject constructor(
                     locationDao.update(
                         nearby.copy(
                             photoUri = thumbnailUri,
-                            notes = mergeNotes(nearby.notes, "Photo thumbnail attached"),
+                            notes = mergeNotes(
+                                nearby.notes,
+                                "Photo thumbnail attached (${resolved.source})"
+                            ),
                             updatedAtMillis = System.currentTimeMillis()
                         )
                     )
                     return ImportOutcome.ATTACHED
                 }
-                // Point already there with a photo — treat as already present.
                 return ImportOutcome.DUPLICATE
             }
 
@@ -152,7 +176,7 @@ class PhotoTimelineImporter @Inject constructor(
                     city = place.city,
                     confidence = "VERIFIED",
                     originalSourceId = sourceId,
-                    notes = "Imported from photo",
+                    notes = "Imported from photo (${resolved.source})",
                     photoUri = thumbnailUri,
                     createdAtMillis = now,
                     updatedAtMillis = now
@@ -165,12 +189,164 @@ class PhotoTimelineImporter @Inject constructor(
         }
     }
 
+    private fun resolvePhotoLocation(uri: Uri): ResolvedPhotoLocation? {
+        openExif(uri)?.let { exif ->
+            val latLon = exif.latLong
+            if (latLon != null && latLon.size >= 2 && isValidLatLon(latLon[0], latLon[1])) {
+                return ResolvedPhotoLocation(
+                    latitude = latLon[0],
+                    longitude = latLon[1],
+                    altitudeMeters = exif.getAltitude(Double.NaN).takeIf { !it.isNaN() },
+                    timestampMillis = readExifTimestamp(exif),
+                    source = "exif"
+                )
+            }
+            // Manual GPS tag read as fallback for some OEM encodings.
+            readManualGpsTags(exif)?.let { (lat, lon) ->
+                return ResolvedPhotoLocation(
+                    latitude = lat,
+                    longitude = lon,
+                    altitudeMeters = exif.getAltitude(Double.NaN).takeIf { !it.isNaN() },
+                    timestampMillis = readExifTimestamp(exif),
+                    source = "exif_tags"
+                )
+            }
+        }
+
+        readMediaStoreLocation(uri)?.let { return it }
+        return null
+    }
+
+    private fun openExif(uri: Uri): ExifInterface? {
+        val readableUri = uriWithOriginalLocation(uri)
+        // Prefer a seekable FileDescriptor — InputStream often misses GPS on picker URIs.
+        runCatching {
+            context.contentResolver.openFileDescriptor(readableUri, "r")?.use { pfd ->
+                return ExifInterface(pfd.fileDescriptor)
+            }
+        }.onFailure { Log.w(TAG, "openFileDescriptor EXIF failed for $uri", it) }
+
+        // Copy to a temp file so ExifInterface can seek freely.
+        runCatching {
+            val temp = File(context.cacheDir, "exif_${System.currentTimeMillis()}.tmp")
+            context.contentResolver.openInputStream(readableUri)?.use { input ->
+                FileOutputStream(temp).use { output -> input.copyTo(output) }
+            } ?: return@runCatching null
+            return try {
+                ExifInterface(temp.absolutePath)
+            } finally {
+                temp.delete()
+            }
+        }.onFailure { Log.w(TAG, "temp-file EXIF failed for $uri", it) }
+
+        return runCatching {
+            context.contentResolver.openInputStream(readableUri)?.use { input ->
+                ExifInterface(input)
+            }
+        }.getOrNull()
+    }
+
+    private fun uriWithOriginalLocation(uri: Uri): Uri {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return uri
+        return runCatching { MediaStore.setRequireOriginal(uri) }.getOrDefault(uri)
+    }
+
+    private fun readManualGpsTags(exif: ExifInterface): Pair<Double, Double>? {
+        val lat = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE) ?: return null
+        val latRef = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF) ?: return null
+        val lon = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE) ?: return null
+        val lonRef = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF) ?: return null
+        val latitude = dmsToDecimal(lat, latRef) ?: return null
+        val longitude = dmsToDecimal(lon, lonRef) ?: return null
+        return if (isValidLatLon(latitude, longitude)) latitude to longitude else null
+    }
+
+    private fun dmsToDecimal(dms: String, ref: String): Double? {
+        return runCatching {
+            val parts = dms.split(',').map { part ->
+                val ratio = part.trim().split('/')
+                val num = ratio[0].toDouble()
+                val den = ratio.getOrNull(1)?.toDouble()?.takeIf { it != 0.0 } ?: 1.0
+                num / den
+            }
+            if (parts.size < 3) return null
+            var value = parts[0] + parts[1] / 60.0 + parts[2] / 3600.0
+            if (ref.equals("S", true) || ref.equals("W", true)) value = -value
+            value
+        }.getOrNull()
+    }
+
+    private fun readMediaStoreLocation(uri: Uri): ResolvedPhotoLocation? {
+        val resolver = context.contentResolver
+        val originalUri = uriWithOriginalLocation(uri)
+        val latitudeColumn = "latitude"
+        val longitudeColumn = "longitude"
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.DATE_ADDED,
+            latitudeColumn,
+            longitudeColumn
+        )
+
+        fun query(target: Uri): ResolvedPhotoLocation? {
+            return runCatching {
+                resolver.query(target, projection, null, null, null)?.use { cursor ->
+                    if (!cursor.moveToFirst()) return@use null
+                    val latIndex = cursor.getColumnIndex(latitudeColumn)
+                    val lonIndex = cursor.getColumnIndex(longitudeColumn)
+                    if (latIndex < 0 || lonIndex < 0) return@use null
+                    if (cursor.isNull(latIndex) || cursor.isNull(lonIndex)) return@use null
+                    val latitude = cursor.getDouble(latIndex)
+                    val longitude = cursor.getDouble(lonIndex)
+                    if (!isValidLatLon(latitude, longitude)) return@use null
+                    val takenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                    val addedIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+                    val taken = if (takenIndex >= 0 && !cursor.isNull(takenIndex)) {
+                        cursor.getLong(takenIndex).takeIf { it > 0L }
+                    } else {
+                        null
+                    }
+                    val added = if (addedIndex >= 0 && !cursor.isNull(addedIndex)) {
+                        cursor.getLong(addedIndex).takeIf { it > 0L }?.times(1000)
+                    } else {
+                        null
+                    }
+                    ResolvedPhotoLocation(
+                        latitude = latitude,
+                        longitude = longitude,
+                        timestampMillis = taken ?: added,
+                        source = "mediastore"
+                    )
+                }
+            }.getOrNull()
+        }
+
+        query(originalUri)?.let { return it }
+        if (originalUri != uri) query(uri)?.let { return it }
+
+        // Photo picker URIs are often content://media/picker/... — resolve via MediaStore id if present.
+        val mediaId = uri.lastPathSegment?.toLongOrNull()
+        if (mediaId != null) {
+            val imageUri = ContentUris.withAppendedId(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                mediaId
+            )
+            query(imageUri)?.let { return it }
+        }
+        return null
+    }
+
+    private fun isValidLatLon(latitude: Double, longitude: Double): Boolean {
+        if (latitude == 0.0 && longitude == 0.0) return false
+        return latitude in -90.0..90.0 && longitude in -180.0..180.0
+    }
+
     private suspend fun findNearbyPoint(
         latitude: Double,
         longitude: Double,
         timestampMillis: Long
     ): LocationEntity? {
-        // ~75 meters latitude delta; longitude scaled by cos(lat).
         val latDelta = 0.0007
         val lonDelta = latDelta / cos(Math.toRadians(latitude)).coerceAtLeast(0.2)
         return locationDao.findNearby(
@@ -179,16 +355,8 @@ class PhotoTimelineImporter @Inject constructor(
             minLon = longitude - lonDelta,
             maxLon = longitude + lonDelta,
             timestampMillis = timestampMillis,
-            windowMillis = 2 * 60 * 60 * 1000L // 2 hours
+            windowMillis = 2 * 60 * 60 * 1000L
         )
-    }
-
-    private fun openExif(uri: Uri): ExifInterface? {
-        return runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                ExifInterface(input)
-            }
-        }.getOrNull()
     }
 
     private fun readExifTimestamp(exif: ExifInterface?): Long? {
