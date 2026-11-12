@@ -96,10 +96,10 @@ fun DashboardScreenV2(
         floatingActionButton = {
             if (uiState.hasData) {
                 FloatingActionButton(
-                    onClick = { viewModel.showAddTrackerDialog() },
+                    onClick = { viewModel.showAddMenu() },
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add day counter")
+                    Icon(Icons.Default.Add, contentDescription = "Add day counter or place photo")
                 }
             }
         }
@@ -216,6 +216,24 @@ fun DashboardScreenV2(
                 }
             }
         }
+    }
+
+    if (uiState.showAddMenu) {
+        DashboardAddMenuDialog(
+            onDismiss = viewModel::hideAddMenu,
+            onAddDayCounter = viewModel::showAddTrackerDialog,
+            onAddPlacePhoto = viewModel::showAddPlacePhotoDialog
+        )
+    }
+
+    if (uiState.showAddPlacePhotoDialog) {
+        AddPlacePhotoDialog(
+            cities = uiState.cities,
+            labels = uiState.placeLabels,
+            photoCounts = uiState.placePhotoCounts,
+            onDismiss = viewModel::hideAddPlacePhotoDialog,
+            onAddPhotos = viewModel::addPhotosToPlace
+        )
     }
 
     if (uiState.showAddTrackerDialog) {

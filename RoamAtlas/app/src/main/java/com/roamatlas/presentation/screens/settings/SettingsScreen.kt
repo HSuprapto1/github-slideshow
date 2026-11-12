@@ -337,8 +337,9 @@ fun SettingsScreen(
             SettingsInformation.HELP ->
                 "If a number looks wrong, open Days to inspect the location evidence and correct " +
                     "individual dates. Tap a country or city to inspect its recorded dates and map.\n\n" +
-                    "To label a place or add photos: Dashboard → Cities → open the place (for example " +
-                    "UTAN) → Label this place and/or Choose photos / Take photo.\n\n" +
+                    "To label a place or add photos: use the Dashboard + button → Place photo, " +
+                    "or Dashboard → Cities → open the place (for example UTAN) → Label this place " +
+                    "and/or Choose photos / Take photo.\n\n" +
                     "For Gmail error code 10, the app’s Google connection is not configured for this " +
                     "signed APK. This is an app setup problem, not a problem with your Gmail password."
         }

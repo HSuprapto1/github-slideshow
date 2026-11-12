@@ -9,7 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
 import java.io.File
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -118,7 +118,7 @@ fun CityDetailScreen(
         pendingCameraUri = null
     }
     fun launchCamera() {
-        val uri = createCameraPhotoUri(context)
+        val uri = createPlaceCameraPhotoUri(context)
         if (uri == null) {
             Toast.makeText(
                 context,
@@ -474,20 +474,6 @@ private fun SavedPlacePhoto(
             }
         }
     }
-}
-
-private fun createCameraPhotoUri(context: android.content.Context): Uri? {
-    return runCatching {
-        val photosDir = File(context.getExternalFilesDir(null), "place_photos").apply {
-            if (!exists()) mkdirs()
-        }
-        val photoFile = File(photosDir, "RoamAtlas_${System.currentTimeMillis()}.jpg")
-        FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            photoFile
-        )
-    }.getOrNull()
 }
 
 private fun formatNumber(value: Int): String =

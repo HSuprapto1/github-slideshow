@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.journey.JourneyWithFlights
+import com.roamatlas.data.repository.SavedPlaceRepository
 import com.roamatlas.data.repository.TravelStatisticsRepository
 import com.roamatlas.data.repository.DayOverrideRepository
 import com.roamatlas.data.repository.ManualDayClassification
@@ -12,6 +13,7 @@ import com.roamatlas.domain.model.DayTracker
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.domain.model.TrackerResult
 import com.roamatlas.domain.repository.DayTrackerRepository
+import com.roamatlas.domain.repository.CityRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,10 +36,15 @@ data class DashboardUiStateV2(
     val homeCountryName: String? = null,
     val isLoading: Boolean = true,
     val hasData: Boolean = false,
+    val showAddMenu: Boolean = false,
     val showAddTrackerDialog: Boolean = false,
+    val showAddPlacePhotoDialog: Boolean = false,
     val editingTracker: DayTracker? = null,
     val trackerPendingDelete: DayTracker? = null,
     val countries: List<Pair<String, String>> = emptyList(),
+    val cities: List<CityRecord> = emptyList(),
+    val placeLabels: Map<String, String> = emptyMap(),
+    val placePhotoCounts: Map<String, Int> = emptyMap(),
     val upcomingJourney: JourneyWithFlights? = null,
     val nowMillis: Long = System.currentTimeMillis(),
     val errorMessage: String? = null
@@ -57,7 +64,8 @@ class DashboardViewModelV2 @Inject constructor(
     private val dayTrackerRepository: DayTrackerRepository,
     private val travelStatisticsRepository: TravelStatisticsRepository,
     private val dayOverrideRepository: DayOverrideRepository,
-    private val journeyRepository: JourneyRepository
+    private val journeyRepository: JourneyRepository,
+    private val savedPlaceRepository: SavedPlaceRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(DashboardUiStateV2())
@@ -94,6 +102,11 @@ class DashboardViewModelV2 @Inject constructor(
                     val upcomingJourney = data.journeys
                         .filter { (it.finalArrivalMillis ?: Long.MIN_VALUE) >= data.now }
                         .minByOrNull { it.firstDepartureMillis ?: Long.MAX_VALUE }
+                    val cities = runCatching { locationRepository.getCities() }.getOrDefault(emptyList())
+                    val placeLabels = runCatching { savedPlaceRepository.getAllLabels() }
+                        .getOrDefault(emptyMap())
+                    val placePhotoCounts = runCatching { savedPlaceRepository.getAllPhotoCounts() }
+                        .getOrDefault(emptyMap())
                     _uiState.value = _uiState.value.copy(
                         travelStats = stats,
                         customTrackers = trackerResults,
@@ -102,6 +115,9 @@ class DashboardViewModelV2 @Inject constructor(
                         isLoading = false,
                         hasData = stats.totalLocationsRecorded > 0 || stats.totalFlights > 0,
                         countries = countries,
+                        cities = cities,
+                        placeLabels = placeLabels,
+                        placePhotoCounts = placePhotoCounts,
                         upcomingJourney = upcomingJourney,
                         nowMillis = data.now,
                         errorMessage = null
@@ -217,8 +233,17 @@ class DashboardViewModelV2 @Inject constructor(
         // Room flows refresh this screen automatically after imports and setting changes.
     }
     
+    fun showAddMenu() {
+        _uiState.value = _uiState.value.copy(showAddMenu = true)
+    }
+
+    fun hideAddMenu() {
+        _uiState.value = _uiState.value.copy(showAddMenu = false)
+    }
+
     fun showAddTrackerDialog() {
         _uiState.value = _uiState.value.copy(
+            showAddMenu = false,
             showAddTrackerDialog = true,
             editingTracker = null
         )
@@ -231,8 +256,43 @@ class DashboardViewModelV2 @Inject constructor(
         )
     }
 
+    fun showAddPlacePhotoDialog() {
+        viewModelScope.launch {
+            val cities = runCatching { locationRepository.getCities() }.getOrDefault(emptyList())
+            val placeLabels = runCatching { savedPlaceRepository.getAllLabels() }
+                .getOrDefault(emptyMap())
+            val placePhotoCounts = runCatching { savedPlaceRepository.getAllPhotoCounts() }
+                .getOrDefault(emptyMap())
+            _uiState.value = _uiState.value.copy(
+                showAddMenu = false,
+                showAddPlacePhotoDialog = true,
+                cities = cities,
+                placeLabels = placeLabels,
+                placePhotoCounts = placePhotoCounts
+            )
+        }
+    }
+
+    fun hideAddPlacePhotoDialog() {
+        _uiState.value = _uiState.value.copy(showAddPlacePhotoDialog = false)
+    }
+
+    fun addPhotosToPlace(countryCode: String, city: String, uris: List<String>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val existing = savedPlaceRepository.getPhotoUris(countryCode, city)
+            val updated = (existing + uris).distinct()
+            savedPlaceRepository.savePhotoUris(countryCode, city, updated)
+            _uiState.value = _uiState.value.copy(
+                placePhotoCounts = savedPlaceRepository.getAllPhotoCounts(),
+                placeLabels = savedPlaceRepository.getAllLabels()
+            )
+        }
+    }
+
     fun editTracker(tracker: DayTracker) {
         _uiState.value = _uiState.value.copy(
+            showAddMenu = false,
             showAddTrackerDialog = true,
             editingTracker = tracker
         )
