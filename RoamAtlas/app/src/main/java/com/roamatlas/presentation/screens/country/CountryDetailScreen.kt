@@ -109,7 +109,7 @@ fun CountryDetailScreen(
                             )
                             SummaryMetric(
                                 formatNumber(country.daysRecorded),
-                                "recorded days",
+                                "days recorded in ${country.countryName}",
                                 Modifier.weight(1f)
                             )
                         }
@@ -123,6 +123,35 @@ fun CountryDetailScreen(
                                 state.years.size.toString(),
                                 "years",
                                 Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "What this day count means",
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (state.isHomeCountry) {
+                                    "These are dates with at least one GPS point in your home country, " +
+                                        "${country.countryName}. They are not days outside your home country."
+                                } else {
+                                    "These are dates with at least one GPS point in ${country.countryName}. " +
+                                        "They are evidence of being abroad, but RoamAtlas calculates total " +
+                                        "days outside your home country separately."
+                                }
+                            )
+                            Text(
+                                "A travel day may contain points in both your home country and another " +
+                                    "country, so it can appear in both country histories.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

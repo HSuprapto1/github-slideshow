@@ -172,6 +172,7 @@ fun DashboardScreenV2(
                     item {
                         TopCountriesSection(
                             countries = uiState.travelStats.countriesVisitedList,
+                            homeCountryCode = uiState.homeCountryCode,
                             onOpenCountry = onOpenCountry
                         )
                     }
@@ -771,6 +772,7 @@ private fun HomeCountrySection(
 @Composable
 private fun TopCountriesSection(
     countries: List<CountryVisitStats>,
+    homeCountryCode: String?,
     onOpenCountry: (String) -> Unit
 ) {
     Column {
@@ -779,6 +781,11 @@ private fun TopCountriesSection(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold
         )
+        Text(
+            text = "Days with GPS records in each country—not total days outside home.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         
         Spacer(modifier = Modifier.height(12.dp))
         
@@ -786,14 +793,22 @@ private fun TopCountriesSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(countries.take(10)) { country ->
-                CountryChip(country, onClick = { onOpenCountry(country.countryCode) })
+                CountryChip(
+                    country = country,
+                    isHomeCountry = country.countryCode == homeCountryCode,
+                    onClick = { onOpenCountry(country.countryCode) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CountryChip(country: CountryVisitStats, onClick: () -> Unit) {
+private fun CountryChip(
+    country: CountryVisitStats,
+    isHomeCountry: Boolean,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier.clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -815,7 +830,8 @@ private fun CountryChip(country: CountryVisitStats, onClick: () -> Unit) {
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = "${country.daysSpent} days",
+                text = "${country.daysSpent} recorded days" +
+                    (if (isHomeCountry) " (home)" else " in country"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )

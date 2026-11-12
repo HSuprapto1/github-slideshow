@@ -17,6 +17,7 @@ data class CountriesUiState(
     val countries: List<CountryVisitStats> = emptyList(),
     val earliestDate: java.time.LocalDate? = null,
     val latestDate: java.time.LocalDate? = null,
+    val homeCountryCode: String? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null
 )
@@ -40,6 +41,7 @@ class CountriesViewModel @Inject constructor(
                             .sortedByDescending { it.daysSpent },
                         earliestDate = statistics.earliestRecordDate,
                         latestDate = statistics.latestRecordDate,
+                        homeCountryCode = statisticsRepository.getHomeCountryCode(),
                         isLoading = false
                     )
                 }

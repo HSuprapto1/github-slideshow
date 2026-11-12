@@ -152,6 +152,12 @@ fun StatisticsScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                Text(
+                    text = "Country days are dates with GPS evidence in that country. " +
+                        "They are not the total days outside your home country.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             
             item {
@@ -309,7 +315,7 @@ private fun CountryListCard(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "days",
+                            text = "recorded days in country",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )

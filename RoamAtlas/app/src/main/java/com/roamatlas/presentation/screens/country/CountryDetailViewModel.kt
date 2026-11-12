@@ -3,6 +3,7 @@ package com.roamatlas.presentation.screens.country
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.roamatlas.data.repository.TravelStatisticsRepository
 import com.roamatlas.domain.repository.CountryDayRecord
 import com.roamatlas.domain.repository.CountryDetail
 import com.roamatlas.domain.repository.CountryYearRecord
@@ -19,6 +20,7 @@ data class CountryDetailUiState(
     val detail: CountryDetail? = null,
     val years: List<CountryYearRecord> = emptyList(),
     val days: List<CountryDayRecord> = emptyList(),
+    val isHomeCountry: Boolean = false,
     val selectedYear: Int? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null
@@ -30,7 +32,8 @@ data class CountryDetailUiState(
 @HiltViewModel
 class CountryDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val locationRepository: LocationRepository
+    private val locationRepository: LocationRepository,
+    private val travelStatisticsRepository: TravelStatisticsRepository
 ) : ViewModel() {
     private val countryCode = savedStateHandle.get<String>("code").orEmpty().uppercase()
     private val _uiState = MutableStateFlow(CountryDetailUiState(countryCode = countryCode))
@@ -63,6 +66,8 @@ class CountryDetailViewModel @Inject constructor(
                     detail = locationRepository.getCountryDetail(countryCode),
                     years = locationRepository.getCountryYearRecords(countryCode),
                     days = locationRepository.getCountryDayRecords(countryCode),
+                    isHomeCountry = travelStatisticsRepository.getHomeCountryCode()
+                        ?.equals(countryCode, ignoreCase = true) == true,
                     isLoading = false
                 )
             } catch (error: Exception) {

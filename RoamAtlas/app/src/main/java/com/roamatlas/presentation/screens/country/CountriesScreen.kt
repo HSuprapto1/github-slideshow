@@ -90,6 +90,12 @@ fun CountriesScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Text(
+                    "Each number means dates with GPS evidence in that country—not the total " +
+                        "days outside your home country.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             item {
                 OutlinedTextField(
@@ -119,6 +125,7 @@ fun CountriesScreen(
                 CountryListCard(
                     rank = state.countries.indexOf(country) + 1,
                     country = country,
+                    isHomeCountry = country.countryCode == state.homeCountryCode,
                     onClick = { onOpenCountry(country.countryCode) }
                 )
             }
@@ -130,6 +137,7 @@ fun CountriesScreen(
 private fun CountryListCard(
     rank: Int,
     country: CountryVisitStats,
+    isHomeCountry: Boolean,
     onClick: () -> Unit
 ) {
     Card(
@@ -158,7 +166,12 @@ private fun CountryListCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "${formatNumber(country.daysSpent)} recorded days" +
+                    "${formatNumber(country.daysSpent)} days recorded " +
+                        (if (isHomeCountry) {
+                            "in your home country"
+                        } else {
+                            "in this country"
+                        }) +
                         country.firstVisit?.let { first ->
                             country.lastVisit?.let { last ->
                                 " · ${formatDate(first)} to ${formatDate(last)}"
