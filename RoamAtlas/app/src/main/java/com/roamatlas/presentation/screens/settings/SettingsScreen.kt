@@ -307,6 +307,9 @@ fun SettingsScreen(
                     "If you choose Gmail import, RoamAtlas asks Google for read-only Gmail " +
                     "permission and searches booking messages through Google. Imported flight " +
                     "details are then saved locally. RoamAtlas cannot send, edit, or delete email.\n\n" +
+                    "When you attach photos, RoamAtlas accesses only the pictures you select. " +
+                    "Originals and newly taken pictures remain in your phone’s gallery; RoamAtlas " +
+                    "stores links to them instead of duplicate full-size copies.\n\n" +
                     "Google Maps tiles, Gmail, and any airline-status page require internet access " +
                     "and are governed by those providers’ policies. Encrypted backups are written " +
                     "only to the file location you choose. Android may also include RoamAtlas data " +

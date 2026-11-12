@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.roamatlas.data.repository.SavedPlaceRepository
 import com.roamatlas.domain.repository.CityRecord
 import java.util.Locale
 
@@ -47,10 +52,22 @@ fun CitiesScreen(
     viewModel: CitiesViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshLabels()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var search by remember { mutableStateOf("") }
-    val visibleCities = remember(search, state.cities) {
+    val visibleCities = remember(search, state.cities, state.customLabels) {
         state.cities.filter {
+            val customLabel = state.customLabels[
+                SavedPlaceRepository.placeId(it.countryCode, it.city)
+            ].orEmpty()
             it.city.contains(search, true) ||
+                customLabel.contains(search, true) ||
                 it.countryName.contains(search, true) ||
                 it.countryCode.contains(search, true)
         }
@@ -110,6 +127,9 @@ fun CitiesScreen(
                 CityListCard(
                     rank = state.cities.indexOf(city) + 1,
                     city = city,
+                    customLabel = state.customLabels[
+                        SavedPlaceRepository.placeId(city.countryCode, city.city)
+                    ],
                     onClick = { onOpenCity(city) }
                 )
             }
@@ -118,7 +138,12 @@ fun CitiesScreen(
 }
 
 @Composable
-private fun CityListCard(rank: Int, city: CityRecord, onClick: () -> Unit) {
+private fun CityListCard(
+    rank: Int,
+    city: CityRecord,
+    customLabel: String?,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -136,7 +161,17 @@ private fun CityListCard(rank: Int, city: CityRecord, onClick: () -> Unit) {
                 modifier = Modifier.padding(end = 12.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
-                Text(city.city, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    customLabel ?: city.city,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                if (customLabel != null) {
+                    Text(
+                        "Detected location: ${city.city}",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
                 Text("${flagEmoji(city.countryCode)} ${city.countryName}")
                 Text(
                     "${formatNumber(city.daysRecorded)} days · ${formatNumber(city.pointCount)} GPS points",
