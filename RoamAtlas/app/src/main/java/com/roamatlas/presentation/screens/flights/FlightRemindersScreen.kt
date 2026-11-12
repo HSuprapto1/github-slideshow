@@ -19,18 +19,25 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -77,7 +84,10 @@ fun FlightRemindersScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            UpcomingFlightCard(upcoming)
+            UpcomingFlightCard(
+                state = upcoming,
+                onSaveAirportDetails = viewModel::updateAirportBoardDetails
+            )
 
             // Main toggle
             Card(
@@ -254,8 +264,14 @@ fun FlightRemindersScreen(
 }
 
 @Composable
-private fun UpcomingFlightCard(state: UpcomingFlightState) {
+private fun UpcomingFlightCard(
+    state: UpcomingFlightState,
+    onSaveAirportDetails: (Long, String, String) -> Unit
+) {
     val flight = state.flight
+    var showAirportDetailsDialog by remember { mutableStateOf(false) }
+    var terminalInput by remember { mutableStateOf("") }
+    var gateInput by remember { mutableStateOf("") }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -297,6 +313,7 @@ private fun UpcomingFlightCard(state: UpcomingFlightState) {
             flight.seatNumber?.takeIf { it.isNotBlank() }?.let { Text("Seat: $it") }
             val gate = noteValue(flight.notes, "Departure gate")
             val terminal = noteValue(flight.notes, "Departure terminal")
+            val airportDetailsSource = noteValue(flight.notes, "Airport details source")
             Text(
                 buildString {
                     if (terminal != null) append("Terminal $terminal • ")
@@ -306,10 +323,64 @@ private fun UpcomingFlightCard(state: UpcomingFlightState) {
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                "Gate information is shown only when it was found in your booking email.",
+                airportDetailsSource?.let { "Source: $it" }
+                    ?: "Gate information is shown only when found in your booking email or entered from the airport board.",
                 style = MaterialTheme.typography.labelSmall
             )
+            OutlinedButton(
+                onClick = {
+                    terminalInput = terminal.orEmpty()
+                    gateInput = gate.orEmpty()
+                    showAirportDetailsDialog = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Update from airport board")
+            }
         }
+    }
+
+    if (showAirportDetailsDialog && flight != null) {
+        AlertDialog(
+            onDismissRequest = { showAirportDetailsDialog = false },
+            title = { Text("Update airport details") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Enter exactly what you see on the airport departure board. You can leave either field empty."
+                    )
+                    OutlinedTextField(
+                        value = terminalInput,
+                        onValueChange = { terminalInput = it },
+                        label = { Text("Terminal") },
+                        placeholder = { Text("Example: 3") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = gateInput,
+                        onValueChange = { gateInput = it },
+                        label = { Text("Gate") },
+                        placeholder = { Text("Example: A12") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSaveAirportDetails(flight.id, terminalInput, gateInput)
+                        showAirportDetailsDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAirportDetailsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

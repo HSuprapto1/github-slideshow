@@ -334,9 +334,17 @@ class ImportFlightsViewModel @Inject constructor(
         terminal: String?,
         includeCombinedSource: Boolean
     ): String? {
+        val hasManualAirportDetails = existingNotes.orEmpty().lineSequence().any {
+            it.equals(
+                "Airport details source: Manually entered from airport board",
+                ignoreCase = true
+            )
+        }
         val additions = buildList {
-            gate?.let { add("Departure gate: $it") }
-            terminal?.let { add("Departure terminal: $it") }
+            if (!hasManualAirportDetails) {
+                gate?.let { add("Departure gate: $it") }
+                terminal?.let { add("Departure terminal: $it") }
+            }
             if (includeCombinedSource) add("Sources: Manual entry + Gmail")
         }
         if (additions.isEmpty()) return existingNotes

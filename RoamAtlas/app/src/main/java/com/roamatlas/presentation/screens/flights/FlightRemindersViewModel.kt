@@ -26,7 +26,7 @@ data class UpcomingFlightState(
 @HiltViewModel
 class FlightRemindersViewModel @Inject constructor(
     private val reminderManager: FlightReminderManager,
-    flightDao: FlightDao
+    private val flightDao: FlightDao
 ) : ViewModel() {
 
     private val clock = MutableStateFlow(System.currentTimeMillis())
@@ -113,5 +113,39 @@ class FlightRemindersViewModel @Inject constructor(
             val current = settings.value
             reminderManager.updateSettings(current.copy(notifyPossibleMissed = notify))
         }
+    }
+
+    fun updateAirportBoardDetails(flightId: Long, terminal: String, gate: String) {
+        viewModelScope.launch {
+            val flight = flightDao.getFlightById(flightId) ?: return@launch
+            val updatedNotes = replaceAirportDetail(
+                notes = flight.notes,
+                terminal = terminal.trim().uppercase(),
+                gate = gate.trim().uppercase()
+            )
+            flightDao.update(
+                flight.copy(
+                    notes = updatedNotes,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    private fun replaceAirportDetail(notes: String?, terminal: String, gate: String): String {
+        val retained = notes.orEmpty().lineSequence()
+            .filter { line ->
+                !line.startsWith("Departure terminal:", ignoreCase = true) &&
+                    !line.startsWith("Departure gate:", ignoreCase = true) &&
+                    !line.startsWith("Airport details source:", ignoreCase = true)
+            }
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        if (terminal.isNotBlank()) retained.add("Departure terminal: $terminal")
+        if (gate.isNotBlank()) retained.add("Departure gate: $gate")
+        if (terminal.isNotBlank() || gate.isNotBlank()) {
+            retained.add("Airport details source: Manually entered from airport board")
+        }
+        return retained.joinToString("\n")
     }
 }
