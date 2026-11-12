@@ -64,6 +64,7 @@ import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyWithFlights
+import com.roamatlas.presentation.screens.journey.JourneyRouteRiskStrip
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.text.NumberFormat
@@ -621,11 +622,7 @@ private fun UpcomingJourneyCard(
                 fontWeight = FontWeight.Bold
             )
             if (journey.flights.isNotEmpty()) {
-                Text(
-                    journey.orderedFlights.joinToString(" → ") { it.departureAirportCode } +
-                        " → ${journey.orderedFlights.last().arrivalAirportCode}",
-                    fontWeight = FontWeight.SemiBold
-                )
+                JourneyRouteRiskStrip(journey)
             }
             countdownTarget?.let {
                 Text(
@@ -638,17 +635,6 @@ private fun UpcomingJourneyCard(
                 "${journey.flights.size} flights · ${formatJourneyDuration(journey.totalJourneyMinutes)} total · " +
                     "${formatJourneyDuration(journey.totalTransitMinutes)} transit"
             )
-            riskyConnection?.let {
-                Text(
-                    if (it.risk == ConnectionRisk.BELOW_RECOMMENDED) {
-                        "Connection below recommended minimum—review alternatives with the airline."
-                    } else {
-                        "One connection may be tight."
-                    },
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold
-                )
-            }
             Text(
                 "Tap for flight details, transit times, delays, route map, and sharing.",
                 style = MaterialTheme.typography.bodySmall

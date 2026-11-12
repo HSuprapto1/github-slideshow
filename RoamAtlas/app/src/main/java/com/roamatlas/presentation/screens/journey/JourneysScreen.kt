@@ -44,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
 import java.text.SimpleDateFormat
@@ -240,7 +239,6 @@ private fun SuggestedJourneyCard(flights: List<FlightEntity>, onCreate: () -> Un
 
 @Composable
 private fun JourneyCard(journey: JourneyWithFlights, onClick: () -> Unit) {
-    val risky = journey.connections.any { it.risk == ConnectionRisk.BELOW_RECOMMENDED }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
@@ -248,26 +246,16 @@ private fun JourneyCard(journey: JourneyWithFlights, onClick: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(journey.journey.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 if (journey.flights.isNotEmpty()) {
-                    Text(
-                        journey.orderedFlights.joinToString(" → ") { it.departureAirportCode } +
-                            " → ${journey.orderedFlights.last().arrivalAirportCode}"
-                    )
+                    JourneyRouteRiskStrip(journey)
                 }
                 Text(
                     "${journey.flights.size} flights · ${formatDuration(journey.totalJourneyMinutes)} total · " +
                         "${formatDuration(journey.totalTransitMinutes)} transit",
                     style = MaterialTheme.typography.bodySmall
                 )
-                if (risky) {
-                    Text(
-                        "Connection needs attention",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
             Icon(Icons.Default.ChevronRight, contentDescription = "Open journey")
         }
