@@ -309,7 +309,9 @@ fun SettingsScreen(
                     "details are then saved locally. RoamAtlas cannot send, edit, or delete email.\n\n" +
                     "Google Maps tiles, Gmail, and any airline-status page require internet access " +
                     "and are governed by those providers’ policies. Encrypted backups are written " +
-                    "only to the file location you choose. You can disconnect Gmail at any time."
+                    "only to the file location you choose. Android may also include RoamAtlas data " +
+                    "in your phone’s device backup when Android backup is enabled; that is controlled " +
+                    "from your phone’s system backup settings. You can disconnect Gmail at any time."
             SettingsInformation.ABOUT ->
                 "RoamAtlas ${BuildConfig.VERSION_NAME}\n\n" +
                     "A local-first personal travel-history app. It turns your Google Timeline or " +
