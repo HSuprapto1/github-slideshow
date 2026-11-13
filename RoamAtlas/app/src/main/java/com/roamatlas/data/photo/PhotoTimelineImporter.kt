@@ -2,6 +2,7 @@ package com.roamatlas.data.photo
 
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -171,6 +172,7 @@ class PhotoTimelineImporter @Inject constructor(
             val accuracy = fallbackLocation?.accuracyMeters
             val thumbnailUri = createThumbnail(uri, sourceId) ?: return ImportOutcome.FAILED
             val originalUri = uri.toString()
+            persistReadPermission(uri)
 
             val nearby = findNearbyPoint(latitude, longitude, timestampMillis)
             if (nearby != null) {
@@ -455,6 +457,18 @@ class PhotoTimelineImporter @Inject constructor(
             if (uri.scheme == "file") {
                 uri.path?.let { File(it).delete() }
             }
+        }
+    }
+
+    private fun persistReadPermission(uri: Uri) {
+        if (uri.scheme != "content") return
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }.onFailure {
+            Log.d(TAG, "Could not persist read permission for $uri")
         }
     }
 

@@ -103,33 +103,42 @@ class PhotosViewModel @Inject constructor(
     }
 
     private fun shareableUri(photo: LocationRecord): Uri? {
-        val photoUri = photo.photoUri?.let(Uri::parse) ?: return null
-        return runCatching {
-            when (photoUri.scheme) {
-                "file" -> {
-                    val file = File(photoUri.path ?: return null)
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        file
-                    )
-                }
-                "content" -> photoUri
-                else -> {
-                    // Copy into cache for sharing if needed.
-                    val cacheDir = File(context.cacheDir, "shared_photos").apply { mkdirs() }
-                    val out = File(cacheDir, "share_${photo.id}.jpg")
-                    context.contentResolver.openInputStream(photoUri)?.use { input ->
-                        out.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        out
-                    )
-                }
+        val candidates = listOfNotNull(
+            photo.originalPhotoUri?.takeIf { it.isNotBlank() },
+            photo.photoUri?.takeIf { it.isNotBlank() }
+        )
+        for (candidate in candidates) {
+            val uri = runCatching { toShareUri(photo.id, Uri.parse(candidate)) }.getOrNull()
+            if (uri != null) return uri
+        }
+        return null
+    }
+
+    private fun toShareUri(photoId: Long, photoUri: Uri): Uri? {
+        return when (photoUri.scheme) {
+            "file" -> {
+                val file = File(photoUri.path ?: return null)
+                if (!file.exists()) return null
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
             }
-        }.getOrNull()
+            "content" -> photoUri
+            else -> {
+                val cacheDir = File(context.cacheDir, "shared_photos").apply { mkdirs() }
+                val out = File(cacheDir, "share_${photoId}.jpg")
+                context.contentResolver.openInputStream(photoUri)?.use { input ->
+                    out.outputStream().use { output -> input.copyTo(output) }
+                } ?: return null
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    out
+                )
+            }
+        }
     }
 
     private fun formatInstant(instant: Instant): String =

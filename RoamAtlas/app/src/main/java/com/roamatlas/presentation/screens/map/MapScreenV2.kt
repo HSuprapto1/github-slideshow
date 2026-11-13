@@ -91,6 +91,8 @@ fun MapScreenV2(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
+    var mapLoaded by remember { mutableStateOf(false) }
+    var fullscreenPhotoUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialLocationId, initialDate, initialCountryCode, initialCity) {
         when {
@@ -110,15 +112,22 @@ fun MapScreenV2(
         )
     }
     
-    LaunchedEffect(uiState.mapCenterLat, uiState.mapCenterLng, uiState.mapZoom) {
-        if (uiState.locations.isNotEmpty()) {
-            cameraPositionState.animate(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(uiState.mapCenterLat, uiState.mapCenterLng),
-                    uiState.mapZoom
-                )
+    LaunchedEffect(
+        mapLoaded,
+        uiState.cameraFocusToken,
+        uiState.mapCenterLat,
+        uiState.mapCenterLng,
+        uiState.mapZoom,
+        uiState.selectedLocation?.id
+    ) {
+        if (!mapLoaded) return@LaunchedEffect
+        if (uiState.locations.isEmpty() && uiState.selectedLocation == null) return@LaunchedEffect
+        cameraPositionState.animate(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(uiState.mapCenterLat, uiState.mapCenterLng),
+                uiState.mapZoom
             )
-        }
+        )
     }
     
     Scaffold(
@@ -127,18 +136,25 @@ fun MapScreenV2(
                 title = {
                     Column {
                         Text(
-                            initialDate?.let {
-                                if (initialCity != null) {
-                                    "$initialCity track · $it"
-                                } else if (initialCountryCode == null) {
-                                    "Track · $it"
-                                } else {
-                                    "$initialCountryCode track · $it"
-                                }
-                            } ?: "World Map"
+                            when {
+                                initialLocationId != null ->
+                                    uiState.selectedLocation?.city?.let { "$it · Photo" }
+                                        ?: "Photo location"
+                                initialDate != null && initialCity != null ->
+                                    "$initialCity track · $initialDate"
+                                initialDate != null && initialCountryCode == null ->
+                                    "Track · $initialDate"
+                                initialDate != null ->
+                                    "$initialCountryCode track · $initialDate"
+                                else -> "World Map"
+                            }
                         )
                         Text(
-                            text = "${uiState.totalLocations} locations",
+                            text = if (initialLocationId != null) {
+                                "1 photo pin"
+                            } else {
+                                "${uiState.totalLocations} locations"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )
@@ -199,7 +215,13 @@ fun MapScreenV2(
                         myLocationButtonEnabled = false,
                         mapToolbarEnabled = true
                     ),
-                    onMapClick = { viewModel.selectLocation(null) }
+                    onMapLoaded = { mapLoaded = true },
+                    onMapClick = {
+                        // Keep the focused photo selected when opened from Photos.
+                        if (initialLocationId == null) {
+                            viewModel.selectLocation(null)
+                        }
+                    }
                 ) {
                     val displayLocations = if (uiState.locations.size > 1000) {
                         uiState.locations.filterIndexed { index, _ -> index % (uiState.locations.size / 1000) == 0 }
@@ -261,16 +283,35 @@ fun MapScreenV2(
                 uiState.selectedLocation?.let { location ->
                     LocationDetailCard(
                         location = location,
-                        onClose = { viewModel.selectLocation(null) }
+                        galleryStyle = !location.photoUri.isNullOrBlank(),
+                        onOpenFullPhoto = { uri -> fullscreenPhotoUri = uri },
+                        onClose = {
+                            if (initialLocationId == null) {
+                                viewModel.selectLocation(null)
+                            }
+                        }
                     )
                 }
+            }
+
+            fullscreenPhotoUri?.let { uri ->
+                FullscreenPhotoViewer(
+                    photoUri = uri,
+                    onDismiss = { fullscreenPhotoUri = null }
+                )
             }
             
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
-                    .padding(bottom = if (uiState.selectedLocation != null) 160.dp else 0.dp),
+                    .padding(
+                        bottom = when {
+                            uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 360.dp
+                            uiState.selectedLocation != null -> 160.dp
+                            else -> 0.dp
+                        }
+                    ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FloatingActionButton(
@@ -469,8 +510,11 @@ private fun LocationMapMarker(
 @Composable
 private fun LocationDetailCard(
     location: LocationRecord,
+    galleryStyle: Boolean = false,
+    onOpenFullPhoto: (String) -> Unit = {},
     onClose: () -> Unit
 ) {
+    val fullPhotoUri = location.fullPhotoUri()
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -508,15 +552,23 @@ private fun LocationDetailCard(
             
             Spacer(modifier = Modifier.height(12.dp))
 
-            location.photoUri?.takeIf { it.isNotBlank() }?.let { photoUri ->
+            fullPhotoUri?.let { photoUri ->
                 AsyncImage(
                     model = Uri.parse(photoUri),
                     contentDescription = "Photo for this timeline point",
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .size(160.dp)
+                        .height(if (galleryStyle) 280.dp else 180.dp)
                         .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.92f))
+                        .clickable { onOpenFullPhoto(photoUri) }
+                )
+                Text(
+                    text = "Tap photo for full gallery view",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -629,6 +681,45 @@ private fun LegendItem(color: Color, label: String) {
         )
     }
 }
+
+@Composable
+private fun FullscreenPhotoViewer(
+    photoUri: String,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(onClick = onDismiss)
+    ) {
+        AsyncImage(
+            model = Uri.parse(photoUri),
+            contentDescription = "Full photo",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)
+                .align(Alignment.Center)
+        )
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close",
+                tint = Color.White
+            )
+        }
+    }
+}
+
+private fun LocationRecord.fullPhotoUri(): String? =
+    originalPhotoUri?.takeIf { it.isNotBlank() }
+        ?: photoUri?.takeIf { it.isNotBlank() }
 
 private fun getFlagEmoji(countryCode: String): String {
     if (countryCode.length != 2) return countryCode

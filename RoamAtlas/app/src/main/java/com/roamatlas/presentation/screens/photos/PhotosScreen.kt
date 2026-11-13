@@ -3,6 +3,7 @@ package com.roamatlas.presentation.screens.photos
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +27,6 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -136,7 +136,7 @@ fun PhotosScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "Tap a photo to open its map pin. Long-press for share or delete.",
+                        "Tap a photo for full view. Use Map from there, or long-press for share/delete.",
                         modifier = Modifier.padding(horizontal = 16.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -167,7 +167,7 @@ fun PhotosScreen(
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(12.dp))
                                         .combinedClickable(
-                                            onClick = { onOpenMap(photo) },
+                                            onClick = { viewModel.select(photo) },
                                             onLongClick = { viewModel.select(photo) }
                                         )
                                 )
@@ -250,6 +250,7 @@ fun PhotosScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoDetail(
     photo: LocationRecord,
@@ -259,21 +260,34 @@ private fun PhotoDetail(
     onShare: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val fullUri = photo.originalPhotoUri?.takeIf { it.isNotBlank() }
+        ?: photo.photoUri?.takeIf { it.isNotBlank() }
+    var showFullscreen by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        AsyncImage(
-            model = photo.photoUri?.let(Uri::parse),
-            contentDescription = "Photo",
-            contentScale = ContentScale.Fit,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .clip(RoundedCornerShape(16.dp))
-        )
+                .background(MaterialTheme.colorScheme.scrim)
+                .combinedClickable(
+                    onClick = { showFullscreen = true },
+                    onLongClick = { showFullscreen = true }
+                )
+        ) {
+            AsyncImage(
+                model = fullUri?.let(Uri::parse),
+                contentDescription = "Photo",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         Text(
             listOfNotNull(photo.city, photo.countryName).joinToString(", ")
                 .ifBlank { "Unknown place" },
@@ -304,6 +318,40 @@ private fun PhotoDetail(
             Icon(Icons.Default.Delete, contentDescription = null)
             Spacer(modifier = Modifier.padding(4.dp))
             Text("Delete")
+        }
+    }
+
+    if (showFullscreen && fullUri != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim)
+                .combinedClickable(
+                    onClick = { showFullscreen = false },
+                    onLongClick = { showFullscreen = false }
+                )
+        ) {
+            AsyncImage(
+                model = Uri.parse(fullUri),
+                contentDescription = "Full photo",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+                    .align(Alignment.Center)
+            )
+            IconButton(
+                onClick = { showFullscreen = false },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Close",
+                    tint = MaterialTheme.colorScheme.onPrimary
+                )
+            }
         }
     }
 }

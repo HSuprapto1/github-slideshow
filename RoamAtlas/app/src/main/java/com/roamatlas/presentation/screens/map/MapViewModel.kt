@@ -34,6 +34,8 @@ data class MapUiState(
     val mapCenterLat: Double = 0.0,
     val mapCenterLng: Double = 0.0,
     val mapZoom: Float = 2f,
+    /** Bumped when the camera must re-center even if lat/lng/zoom values are unchanged. */
+    val cameraFocusToken: Int = 0,
     val countryCodes: List<String> = emptyList(),
     val totalLocations: Int = 0
 )
@@ -194,8 +196,7 @@ class MapViewModel @Inject constructor(
     }
 
     /**
-     * Open the map on one photo/timeline point: zoom to it, select it, and show
-     * photo pins for that day (hide GPS/timeline tracks so the day route does not dominate).
+     * Open the map on exactly one photo point: only that thumbnail pin, centered/zoomed.
      */
     fun focusLocation(locationId: Long) {
         locationsJob?.cancel()
@@ -206,6 +207,7 @@ class MapViewModel @Inject constructor(
                 return@launch
             }
             val date = focused.timestamp.atZone(ZoneId.systemDefault()).toLocalDate()
+            // Single pin only — do not load other photos or the day's GPS track.
             _uiState.value = _uiState.value.copy(
                 filterStartDate = date,
                 filterEndDate = date,
@@ -213,34 +215,15 @@ class MapViewModel @Inject constructor(
                 showGps = false,
                 showTimeline = false,
                 showPhoto = true,
+                locations = listOf(focused),
                 selectedLocation = focused,
+                totalLocations = 1,
                 mapCenterLat = focused.latitude,
                 mapCenterLng = focused.longitude,
                 mapZoom = PHOTO_FOCUS_ZOOM,
-                isLoading = true
+                cameraFocusToken = _uiState.value.cameraFocusToken + 1,
+                isLoading = false
             )
-            locationRepository.getLocationsForLocalDate(
-                localDate = date,
-                countryCode = null,
-                city = null,
-                limit = MAX_MAP_POINTS
-            ).collect { locations ->
-                val photos = locations.filter { !it.photoUri.isNullOrBlank() }
-                val display = buildList {
-                    if (photos.none { it.id == focused.id }) add(focused)
-                    addAll(photos)
-                }.distinctBy { it.id }
-                val selected = display.find { it.id == focused.id } ?: focused
-                _uiState.value = _uiState.value.copy(
-                    locations = display,
-                    selectedLocation = selected,
-                    totalLocations = display.size,
-                    mapCenterLat = selected.latitude,
-                    mapCenterLng = selected.longitude,
-                    mapZoom = PHOTO_FOCUS_ZOOM,
-                    isLoading = false
-                )
-            }
         }
     }
 
@@ -287,7 +270,8 @@ class MapViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             mapCenterLat = lat,
             mapCenterLng = lng,
-            mapZoom = zoom
+            mapZoom = zoom,
+            cameraFocusToken = _uiState.value.cameraFocusToken + 1
         )
     }
 
