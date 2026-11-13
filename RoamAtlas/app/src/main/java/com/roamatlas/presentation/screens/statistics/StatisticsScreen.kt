@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.statistics
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.LocationCity
@@ -20,38 +20,39 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.roamatlas.presentation.theme.DemoData
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.roamatlas.domain.model.CountryVisitClassification
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatisticsScreen() {
+fun StatisticsScreen(
+    onOpenCountry: (String) -> Unit = {},
+    onOpenCountries: () -> Unit = {},
+    onOpenCities: () -> Unit = {},
+    viewModel: StatisticsViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val statistics = uiState.statistics
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
-                    Column {
-                        Text("Travel Statistics")
-                        Text(
-                            text = "Demo Data",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = DemoData
-                        )
-                    }
-                },
+                title = { Text("Travel Statistics") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -66,10 +67,30 @@ fun StatisticsScreen() {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                DemoBanner()
+            if (uiState.isLoading) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) { CircularProgressIndicator() }
+                }
             }
-            
+
+            uiState.error?.let { message ->
+                item { Text("Could not calculate statistics: $message") }
+            }
+
+            if (!uiState.isLoading && statistics.totalLocationsRecorded == 0) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Import your Timeline or start GPS tracking to see real statistics.",
+                            modifier = Modifier.padding(20.dp)
+                        )
+                    }
+                }
+            }
+
             item {
                 Text(
                     text = "Overview",
@@ -86,16 +107,18 @@ fun StatisticsScreen() {
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Public,
-                        value = "12",
+                        value = statistics.totalCountriesVisited.toString(),
                         label = "Countries",
-                        subtitle = "visited"
+                        subtitle = "visited",
+                        onClick = onOpenCountries
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.LocationCity,
-                        value = "47",
+                        value = statistics.totalCitiesVisited.toString(),
                         label = "Cities",
-                        subtitle = "explored"
+                        subtitle = "explored",
+                        onClick = onOpenCities
                     )
                 }
             }
@@ -108,14 +131,14 @@ fun StatisticsScreen() {
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Flight,
-                        value = "23",
+                        value = statistics.totalFlights.toString(),
                         label = "Trips",
                         subtitle = "recorded"
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Schedule,
-                        value = "1,847",
+                        value = statistics.totalDaysTracked.toString(),
                         label = "Days",
                         subtitle = "tracked"
                     )
@@ -129,24 +152,26 @@ fun StatisticsScreen() {
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                Text(
+                    text = "Country days are dates with GPS evidence in that country. " +
+                        "They are not the total days outside your home country.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             
             item {
                 CountryListCard(
-                    countries = listOf(
-                        CountryStats("United Kingdom", "GB", 423),
-                        CountryStats("United States", "US", 312),
-                        CountryStats("Portugal", "PT", 198),
-                        CountryStats("Spain", "ES", 87),
-                        CountryStats("France", "FR", 65),
-                        CountryStats("Germany", "DE", 42),
-                        CountryStats("Italy", "IT", 38),
-                        CountryStats("Netherlands", "NL", 28),
-                        CountryStats("Japan", "JP", 21),
-                        CountryStats("Singapore", "SG", 14),
-                        CountryStats("Thailand", "TH", 12),
-                        CountryStats("UAE", "AE", 7)
-                    )
+                    countries = statistics.countriesVisitedList.map {
+                        CountryStats(
+                            it.countryName,
+                            it.countryCode,
+                            it.daysSpent,
+                            it.classification,
+                            it.classificationReason
+                        )
+                    },
+                    onOpenCountry = onOpenCountry
                 )
             }
             
@@ -161,14 +186,9 @@ fun StatisticsScreen() {
             
             item {
                 YearlySummaryCard(
-                    years = listOf(
-                        YearStats(2026, 287, 8),
-                        YearStats(2025, 365, 11),
-                        YearStats(2024, 342, 9),
-                        YearStats(2023, 298, 7),
-                        YearStats(2022, 312, 8),
-                        YearStats(2021, 243, 4)
-                    )
+                    years = statistics.yearlyStats.map {
+                        YearStats(it.year, it.daysTracked, it.countriesVisited)
+                    }
                 )
             }
             
@@ -180,31 +200,18 @@ fun StatisticsScreen() {
 }
 
 @Composable
-private fun DemoBanner() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = DemoData.copy(alpha = 0.15f),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Text(
-            text = "Statistics shown are demo data. Import your location history to see real statistics.",
-            style = MaterialTheme.typography.bodySmall,
-            color = DemoData,
-            modifier = Modifier.padding(12.dp)
-        )
-    }
-}
-
-@Composable
 private fun StatCard(
     modifier: Modifier = Modifier,
     icon: ImageVector,
     value: String,
     label: String,
-    subtitle: String
+    subtitle: String,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+        ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -243,11 +250,16 @@ private fun StatCard(
 data class CountryStats(
     val name: String,
     val code: String,
-    val days: Int
+    val days: Int,
+    val classification: CountryVisitClassification,
+    val reason: String?
 )
 
 @Composable
-private fun CountryListCard(countries: List<CountryStats>) {
+private fun CountryListCard(
+    countries: List<CountryStats>,
+    onOpenCountry: (String) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -261,6 +273,7 @@ private fun CountryListCard(countries: List<CountryStats>) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable { onOpenCountry(country.code) }
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -281,6 +294,17 @@ private fun CountryListCard(countries: List<CountryStats>) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
+                            if (country.classification != CountryVisitClassification.VISITED) {
+                                Text(
+                                    text = if (country.classification == CountryVisitClassification.TRANSIT) {
+                                        "Transit"
+                                    } else {
+                                        "Possible transit"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
                         }
                     }
                     Column(horizontalAlignment = Alignment.End) {
@@ -291,7 +315,7 @@ private fun CountryListCard(countries: List<CountryStats>) {
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "days",
+                            text = "recorded days in country",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )

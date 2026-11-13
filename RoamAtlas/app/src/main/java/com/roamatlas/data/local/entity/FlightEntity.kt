@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["departureTimeMillis"]),
         Index(value = ["departureAirportCode"]),
-        Index(value = ["arrivalAirportCode"])
+        Index(value = ["arrivalAirportCode"]),
+        Index(value = ["journeyId"])
     ]
 )
 data class FlightEntity(
@@ -36,8 +37,32 @@ data class FlightEntity(
     val photoUri: String?,
     val source: String,
     val createdAtMillis: Long,
-    val updatedAtMillis: Long
+    val updatedAtMillis: Long,
+    val journeyId: Long? = null,
+    val journeySequence: Int? = null,
+    val estimatedDepartureTimeMillis: Long? = null,
+    val estimatedArrivalTimeMillis: Long? = null,
+    val flightStatus: String? = null,
+    val separateTicketFromPrevious: Boolean? = null,
+    val minimumConnectionMinutes: Int? = null,
+    /** FLIGHT, TRAIN, or BUS — stations reuse airport code fields. */
+    val transportMode: String = TransportMode.FLIGHT
 )
+
+object TransportMode {
+    const val FLIGHT = "FLIGHT"
+    const val TRAIN = "TRAIN"
+    const val BUS = "BUS"
+
+    fun label(mode: String?): String = when (mode?.uppercase()) {
+        TRAIN -> "Train"
+        BUS -> "Bus"
+        else -> "Flight"
+    }
+
+    fun isFlight(mode: String?): Boolean =
+        mode.isNullOrBlank() || mode.equals(FLIGHT, ignoreCase = true)
+}
 
 @Entity(tableName = "trips")
 data class TripEntity(

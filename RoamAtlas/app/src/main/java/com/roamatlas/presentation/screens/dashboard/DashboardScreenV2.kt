@@ -2,6 +2,7 @@ package com.roamatlas.presentation.screens.dashboard
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,41 +31,77 @@ import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.roamatlas.domain.model.CountryVisitStats
+import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
+import com.roamatlas.data.journey.ConnectionRisk
+import com.roamatlas.data.journey.JourneyWithFlights
+import com.roamatlas.presentation.screens.journey.JourneyRouteRiskStrip
+import com.roamatlas.presentation.screens.photos.LocationPickerScreen
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.text.NumberFormat
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreenV2(
+    onSelectHomeCountry: () -> Unit = {},
+    onOpenCountry: (String) -> Unit = {},
+    onOpenCountries: () -> Unit = {},
+    onOpenCities: () -> Unit = {},
+    onOpenToday: () -> Unit = {},
+    onOpenJourneys: () -> Unit = {},
+    onOpenJourney: (Long) -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    if (uiState.showLocationPicker) {
+        LocationPickerScreen(
+            onNavigateBack = viewModel::hideLocationPicker,
+            onLocationChosen = viewModel::resolvePendingWithMapLocation
+        )
+        return
+    }
     
     Scaffold(
         topBar = {
@@ -77,11 +114,13 @@ fun DashboardScreenV2(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { viewModel.showAddTrackerDialog() },
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Custom Tracker")
+            if (uiState.hasData) {
+                FloatingActionButton(
+                    onClick = { viewModel.showAddMenu() },
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add day counter or photo to timeline")
+                }
             }
         }
     ) { paddingValues ->
@@ -105,12 +144,53 @@ fun DashboardScreenV2(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (uiState.errorMessage != null) {
+                    item {
+                        Text(
+                            text = uiState.errorMessage!!,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+
+                if (uiState.homeCountryCode == null) {
+                    item {
+                        HomeCountryPrompt(onSelectHomeCountry)
+                    }
+                }
+
                 item {
-                    TravelOverviewSection(uiState.travelStats)
+                    DataCoverageSection(uiState.travelStats)
+                }
+
+                item {
+                    TodayActivityCard(
+                        pointCount = uiState.todayPointCount,
+                        cities = uiState.todayCities,
+                        onOpenToday = onOpenToday
+                    )
+                }
+
+                item {
+                    TravelOverviewSection(
+                        stats = uiState.travelStats,
+                        onOpenCountries = onOpenCountries,
+                        onOpenCities = onOpenCities
+                    )
                 }
                 
                 item {
-                    FlightStatisticsSection(uiState.travelStats)
+                    uiState.upcomingJourney?.let {
+                        UpcomingJourneyCard(
+                            journey = it,
+                            nowMillis = uiState.nowMillis,
+                            onClick = { onOpenJourney(it.journey.id) }
+                        )
+                    }
+                }
+
+                item {
+                    FlightStatisticsSection(uiState.travelStats, onOpenJourneys)
                 }
                 
                 if (uiState.homeCountryCode != null) {
@@ -122,10 +202,22 @@ fun DashboardScreenV2(
                         )
                     }
                 }
+
+                item {
+                    TravelFactsSection(
+                        stats = uiState.travelStats,
+                        homeCountryCode = uiState.homeCountryCode,
+                        homeCountryName = uiState.homeCountryName
+                    )
+                }
                 
                 if (uiState.travelStats.countriesVisitedList.isNotEmpty()) {
                     item {
-                        TopCountriesSection(uiState.travelStats.countriesVisitedList)
+                        TopCountriesSection(
+                            countries = uiState.travelStats.countriesVisitedList,
+                            homeCountryCode = uiState.homeCountryCode,
+                            onOpenCountry = onOpenCountry
+                        )
                     }
                 }
                 
@@ -139,7 +231,11 @@ fun DashboardScreenV2(
                     }
                     
                     items(uiState.customTrackers) { result ->
-                        CustomTrackerCard(result)
+                        CustomTrackerCard(
+                            result = result,
+                            onEdit = { viewModel.editTracker(result.tracker) },
+                            onDelete = { viewModel.requestDeleteTracker(result.tracker) }
+                        )
                     }
                 }
                 
@@ -149,84 +245,216 @@ fun DashboardScreenV2(
             }
         }
     }
+
+    if (uiState.showAddMenu) {
+        DashboardAddMenuDialog(
+            onDismiss = viewModel::hideAddMenu,
+            onAddDayCounter = viewModel::showAddTrackerDialog,
+            onAddPlacePhoto = viewModel::showAddPhotoDialog
+        )
+    }
+
+    if (uiState.showAddPhotoDialog && !uiState.showLocationPicker) {
+        AddPhotoToTimelineDialog(
+            isImporting = uiState.photoImporting,
+            lastResultMessage = uiState.photoImportMessage,
+            onDismiss = viewModel::hideAddPhotoDialog,
+            onImportGallery = viewModel::importGalleryPhotos,
+            onImportCaptured = viewModel::importCapturedPhoto
+        )
+    }
+
+    if (uiState.showNoGpsResolver && !uiState.showLocationPicker) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        ResolveNoGpsPhotoDialog(
+            remainingCount = uiState.pendingNoGpsUris.size,
+            isWorking = uiState.photoImporting,
+            onUseCurrentLocation = {
+                scope.launch {
+                    val capture = withContext(Dispatchers.IO) {
+                        readCurrentLocation(context)
+                    }
+                    if (capture == null) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Could not read current GPS. Try Pick on map instead.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        viewModel.resolvePendingWithCurrentLocation(capture)
+                    }
+                }
+            },
+            onPickOnMap = viewModel::openLocationPickerForPending,
+            onSkip = viewModel::skipCurrentNoGpsPhoto,
+            onDismiss = viewModel::hideAddPhotoDialog
+        )
+    }
+
+    if (uiState.showLocationPicker) {
+        // Full-screen picker hosted as a dialog-like overlay via separate route content below.
+    }
+
+    if (uiState.showAddTrackerDialog) {
+        AddTrackerDialog(
+            countries = uiState.countries,
+            defaultCountryCode = uiState.homeCountryCode,
+            historyStart = uiState.travelStats.earliestRecordDate,
+            historyEnd = uiState.travelStats.latestRecordDate,
+            existingTracker = uiState.editingTracker,
+            onDismiss = viewModel::hideAddTrackerDialog,
+            onAdd = viewModel::saveTracker
+        )
+    }
+
+    uiState.trackerPendingDelete?.let { tracker ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDeleteTracker,
+            title = { Text("Delete this counter?") },
+            text = {
+                Text("\"${tracker.name}\" will be removed. Your Timeline data will not be deleted.")
+            },
+            confirmButton = {
+                Button(onClick = viewModel::confirmDeleteTracker) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDeleteTracker) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun EmptyStateScreen(modifier: Modifier = Modifier) {
-    Column(
+    LazyColumn(
         modifier = modifier
-            .fillMaxSize()
-            .padding(32.dp),
+            .fillMaxSize(),
+        contentPadding = PaddingValues(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Icon(
-            imageVector = Icons.Default.TravelExplore,
-            contentDescription = null,
-            modifier = Modifier.size(120.dp),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Text(
-            text = "Welcome to RoamAtlas",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = "Your personal travel history companion",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        item {
+            Icon(
+                imageVector = Icons.Default.TravelExplore,
+                contentDescription = null,
+                modifier = Modifier.size(100.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
             )
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp)
+        }
+        item {
+            Text(
+                text = "Welcome to RoamAtlas",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
+        item {
+            Text(
+                text = "Your personal travel history companion",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                )
             ) {
-                Text(
-                    text = "Get Started",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                GetStartedItem(
-                    number = "1",
-                    text = "Import your Google Timeline from Settings"
-                )
-                GetStartedItem(
-                    number = "2",
-                    text = "Or enable GPS tracking to record new locations"
-                )
-                GetStartedItem(
-                    number = "3",
-                    text = "Add flights manually or import from Gmail"
-                )
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Get Started",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    GetStartedItem("1", "Import your Google Timeline from Settings")
+                    GetStartedItem("2", "Or enable GPS tracking to record new locations")
+                    GetStartedItem("3", "Add flights manually or import from Gmail")
+                }
             }
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            text = "Go to Settings to import your data",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Medium
+        item {
+            Text(
+                text = "Go to Settings to import your data",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayActivityCard(
+    pointCount: Int,
+    cities: List<String>,
+    onOpenToday: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenToday),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
         )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("Today", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (pointCount == 0) "No recorded points yet today"
+                else "$pointCount recorded point${if (pointCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (cities.isNotEmpty()) {
+                Text(
+                    "Around ${cities.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Text(
+                "Tap to open today’s points on the map",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeCountryPrompt(onSelectHomeCountry: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = "Choose your home country",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "RoamAtlas needs this to show days at home and days abroad.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            Button(onClick = onSelectHomeCountry) {
+                Text("Select home country")
+            }
+        }
     }
 }
 
@@ -259,7 +487,147 @@ private fun GetStartedItem(number: String, text: String) {
 }
 
 @Composable
-private fun TravelOverviewSection(stats: TravelStatistics) {
+private fun DataCoverageSection(stats: TravelStatistics) {
+    val first = stats.earliestRecordDate
+    val last = stats.latestRecordDate
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                "What these numbers cover",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "${stats.totalDaysTracked} days have location records",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (first != null && last != null) {
+                Text(
+                    "From ${formatDashboardDate(first)} to ${formatDashboardDate(last)}"
+                )
+            }
+            Text(
+                "The country and city totals below use this same period. Days without a location record are not counted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TravelFactsSection(
+    stats: TravelStatistics,
+    homeCountryCode: String?,
+    homeCountryName: String?
+) {
+    val first = stats.earliestRecordDate
+    val last = stats.latestRecordDate
+    val spanYears = if (first != null && last != null) {
+        last.year - first.year + 1
+    } else 0
+    val classifiedHomeDays = stats.daysInsideHomeCountry + stats.daysOutsideHomeCountry
+    val abroadPercent = if (classifiedHomeDays > 0) {
+        stats.daysOutsideHomeCountry * 100 / classifiedHomeDays
+    } else null
+    val destinationsBeyondHome = stats.countriesVisitedList.count {
+        it.countryCode != homeCountryCode &&
+            it.classification != CountryVisitClassification.TRANSIT
+    }
+    val firstCountry = stats.countriesVisitedList
+        .filter { it.firstVisit != null }
+        .minByOrNull { it.firstVisit!! }
+    val latestCountry = stats.countriesVisitedList
+        .filter { it.lastVisit != null }
+        .maxByOrNull { it.lastVisit!! }
+
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Interesting facts",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Collapse" else "Expand"
+                    )
+                }
+                if (!expanded) {
+                    Text(
+                        "Tap to show optional travel facts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (spanYears > 0) {
+                            FactLine("Your records span $spanYears calendar ${if (spanYears == 1) "year" else "years"}.")
+                        }
+                        if (homeCountryCode != null) {
+                            FactLine(
+                                "Beyond ${homeCountryName ?: homeCountryCode}, records appear in " +
+                                    "$destinationsBeyondHome other ${if (destinationsBeyondHome == 1) "country" else "countries"}."
+                            )
+                        }
+                        abroadPercent?.let {
+                            FactLine(
+                                "$it% of days with home/abroad evidence are marked outside " +
+                                    "${homeCountryName ?: homeCountryCode}."
+                            )
+                        }
+                        firstCountry?.let {
+                            FactLine(
+                                "First country record: ${it.countryName} on ${formatDashboardDate(it.firstVisit!!)}."
+                            )
+                        }
+                        latestCountry?.let {
+                            FactLine(
+                                "Latest country record: ${it.countryName} on ${formatDashboardDate(it.lastVisit!!)}."
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FactLine(text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text("•", fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun TravelOverviewSection(
+    stats: TravelStatistics,
+    onOpenCountries: () -> Unit,
+    onOpenCities: () -> Unit
+) {
     Column {
         Text(
             text = "Travel Overview",
@@ -278,14 +646,16 @@ private fun TravelOverviewSection(stats: TravelStatistics) {
                 icon = Icons.Default.Public,
                 value = stats.totalCountriesVisited.toString(),
                 label = "Countries",
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                onClick = onOpenCountries
             )
             StatCard(
                 modifier = Modifier.weight(1f),
                 icon = Icons.Default.LocationCity,
                 value = stats.totalCitiesVisited.toString(),
                 label = "Cities",
-                color = MaterialTheme.colorScheme.secondary
+                color = MaterialTheme.colorScheme.secondary,
+                onClick = onOpenCities
             )
             StatCard(
                 modifier = Modifier.weight(1f),
@@ -351,7 +721,73 @@ private fun TravelOverviewSection(stats: TravelStatistics) {
 }
 
 @Composable
-private fun FlightStatisticsSection(stats: TravelStatistics) {
+private fun UpcomingJourneyCard(
+    journey: JourneyWithFlights,
+    nowMillis: Long,
+    onClick: () -> Unit
+) {
+    val firstDeparture = journey.firstDepartureMillis
+    val nextFlight = journey.orderedFlights.firstOrNull {
+        (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > nowMillis
+    }
+    val countdownTarget = if (
+        firstDeparture != null &&
+        nowMillis < firstDeparture
+    ) {
+        firstDeparture
+    } else {
+        nextFlight?.estimatedDepartureTimeMillis ?: nextFlight?.departureTimeMillis
+    }
+    val riskyConnection = journey.connections.firstOrNull {
+        it.risk != ConnectionRisk.COMFORTABLE
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = if (riskyConnection?.risk == ConnectionRisk.BELOW_RECOMMENDED) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text("Upcoming journey", style = MaterialTheme.typography.labelLarge)
+            Text(
+                journey.journey.name,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (journey.flights.isNotEmpty()) {
+                JourneyRouteRiskStrip(journey)
+            }
+            countdownTarget?.let {
+                Text(
+                    "Next departure in ${formatJourneyDuration((it - nowMillis) / 60_000)}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                "${journey.flights.size} flights · ${formatJourneyDuration(journey.totalJourneyMinutes)} total · " +
+                    "${formatJourneyDuration(journey.totalTransitMinutes)} transit"
+            )
+            Text(
+                "Tap for flight details, transit times, delays, route map, and sharing.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun FlightStatisticsSection(
+    stats: TravelStatistics,
+    onOpenJourneys: () -> Unit
+) {
     Column {
         Text(
             text = "Flight Statistics",
@@ -362,7 +798,7 @@ private fun FlightStatisticsSection(stats: TravelStatistics) {
         Spacer(modifier = Modifier.height(12.dp))
         
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenJourneys)
         ) {
             Column(
                 modifier = Modifier.padding(16.dp)
@@ -431,6 +867,12 @@ private fun FlightStatisticsSection(stats: TravelStatistics) {
                         }
                     }
                 }
+                Text(
+                    "Tap to combine flights into named journeys and review connections.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
             }
         }
     }
@@ -555,12 +997,21 @@ private fun HomeCountrySection(
 }
 
 @Composable
-private fun TopCountriesSection(countries: List<CountryVisitStats>) {
+private fun TopCountriesSection(
+    countries: List<CountryVisitStats>,
+    homeCountryCode: String?,
+    onOpenCountry: (String) -> Unit
+) {
     Column {
         Text(
             text = "Top Countries",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "Days with GPS records in each country—not total days outside home.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         
         Spacer(modifier = Modifier.height(12.dp))
@@ -569,15 +1020,24 @@ private fun TopCountriesSection(countries: List<CountryVisitStats>) {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(countries.take(10)) { country ->
-                CountryChip(country)
+                CountryChip(
+                    country = country,
+                    isHomeCountry = country.countryCode == homeCountryCode,
+                    onClick = { onOpenCountry(country.countryCode) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CountryChip(country: CountryVisitStats) {
+private fun CountryChip(
+    country: CountryVisitStats,
+    isHomeCountry: Boolean,
+    onClick: () -> Unit
+) {
     Card(
+        modifier = Modifier.clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -597,7 +1057,8 @@ private fun CountryChip(country: CountryVisitStats) {
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = "${country.daysSpent} days",
+                text = "${country.daysSpent} recorded days" +
+                    (if (isHomeCountry) " (home)" else " in country"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
@@ -607,7 +1068,9 @@ private fun CountryChip(country: CountryVisitStats) {
 
 @Composable
 private fun CustomTrackerCard(
-    result: com.roamatlas.domain.model.TrackerResult
+    result: com.roamatlas.domain.model.TrackerResult,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -629,7 +1092,11 @@ private fun CustomTrackerCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = result.tracker.countryName,
+                        text = if (result.tracker.countInsideCountry) {
+                            "Inside ${result.tracker.countryName}"
+                        } else {
+                            "Outside ${result.tracker.countryName}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -648,7 +1115,94 @@ private fun CustomTrackerCard(
                     )
                 }
             }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TrackerMetric(
+                    value = result.totalDays.toString(),
+                    label = if (result.tracker.countInsideCountry) {
+                        "inside so far"
+                    } else {
+                        "outside so far"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                TrackerMetric(
+                    value = result.daysUntilRangeEnd.toString(),
+                    label = "days until range ends",
+                    modifier = Modifier.weight(1f)
+                )
+                TrackerMetric(
+                    value = when {
+                        result.tracker.thresholdDays == null -> "Not set"
+                        result.thresholdExceeded == true -> "Reached"
+                        else -> result.daysNeededForThreshold.toString()
+                    },
+                    label = when {
+                        result.tracker.thresholdDays == null -> "threshold"
+                        result.thresholdExceeded == true -> "threshold"
+                        else -> "more days needed"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            result.tracker.thresholdDays?.let { threshold ->
+                Text(
+                    text = "Target: $threshold " +
+                        if (result.tracker.countInsideCountry) "inside days" else "outside days",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (result.thresholdExceeded == true) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (result.thresholdExceeded == true) {
+                        FontWeight.Bold
+                    } else {
+                        FontWeight.Normal
+                    },
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onEdit) {
+                    Text("Edit")
+                }
+                TextButton(onClick = onDelete) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun TrackerMetric(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -658,10 +1212,13 @@ private fun StatCard(
     icon: ImageVector,
     value: String,
     label: String,
-    color: Color
+    color: Color,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+        ),
         colors = CardDefaults.cardColors(
             containerColor = color.copy(alpha = 0.15f)
         )
@@ -714,3 +1271,18 @@ private fun formatDuration(minutes: Int): String {
         else -> "${hours}h"
     }
 }
+
+private fun formatJourneyDuration(totalMinutes: Long): String {
+    val safe = totalMinutes.coerceAtLeast(0)
+    val days = safe / 1440
+    val hours = safe % 1440 / 60
+    val minutes = safe % 60
+    return buildList {
+        if (days > 0) add("${days}d")
+        if (hours > 0 || days > 0) add("${hours}h")
+        add("${minutes}m")
+    }.joinToString(" ")
+}
+
+private fun formatDashboardDate(date: java.time.LocalDate): String =
+    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))

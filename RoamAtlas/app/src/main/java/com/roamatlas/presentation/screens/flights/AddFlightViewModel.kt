@@ -2,8 +2,11 @@ package com.roamatlas.presentation.screens.flights
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TransportMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,11 +20,14 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 data class AddFlightUiState(
+    val transportMode: String = TransportMode.FLIGHT,
     // Departure
     val departureAirportCode: String = "",
     val departureAirportName: String = "",
     val departureCity: String = "",
     val departureCountryCode: String = "",
+    val departureAirportSearch: String = "",
+    val departureAirportSuggestions: List<Airport> = emptyList(),
     val departureDateMillis: Long? = null,
     val departureHour: Int = 12,
     val departureMinute: Int = 0,
@@ -31,6 +37,8 @@ data class AddFlightUiState(
     val arrivalAirportName: String = "",
     val arrivalCity: String = "",
     val arrivalCountryCode: String = "",
+    val arrivalAirportSearch: String = "",
+    val arrivalAirportSuggestions: List<Airport> = emptyList(),
     val arrivalDateMillis: Long? = null,
     val arrivalHour: Int = 14,
     val arrivalMinute: Int = 0,
@@ -52,58 +60,100 @@ data class AddFlightUiState(
     val error: String? = null
 ) {
     val isValid: Boolean
-        get() = departureAirportCode.length == 3 &&
-                arrivalAirportCode.length == 3 &&
-                departureDateMillis != null &&
-                arrivalDateMillis != null
+        get() {
+            val codeOk = if (TransportMode.isFlight(transportMode)) {
+                departureAirportCode.length == 3 && arrivalAirportCode.length == 3
+            } else {
+                departureAirportCode.length >= 2 && arrivalAirportCode.length >= 2
+            }
+            return codeOk && departureDateMillis != null && arrivalDateMillis != null
+        }
 }
 
 @HiltViewModel
 class AddFlightViewModel @Inject constructor(
-    private val flightDao: FlightDao
+    private val flightDao: FlightDao,
+    private val airportRepository: AirportRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(AddFlightUiState())
     val uiState: StateFlow<AddFlightUiState> = _uiState.asStateFlow()
     
-    // Airport coordinates for distance calculation (major airports)
-    private val airportCoordinates = mapOf(
-        "SIN" to Pair(1.3644, 103.9915),    // Singapore Changi
-        "CGK" to Pair(-6.1256, 106.6558),   // Jakarta
-        "DPS" to Pair(-8.7467, 115.1672),   // Bali
-        "KUL" to Pair(2.7456, 101.7072),    // Kuala Lumpur
-        "BKK" to Pair(13.6900, 100.7501),   // Bangkok
-        "HKG" to Pair(22.3080, 113.9185),   // Hong Kong
-        "NRT" to Pair(35.7720, 140.3929),   // Tokyo Narita
-        "HND" to Pair(35.5494, 139.7798),   // Tokyo Haneda
-        "ICN" to Pair(37.4602, 126.4407),   // Seoul Incheon
-        "PVG" to Pair(31.1443, 121.8083),   // Shanghai Pudong
-        "PEK" to Pair(40.0799, 116.6031),   // Beijing
-        "SYD" to Pair(-33.9399, 151.1753),  // Sydney
-        "MEL" to Pair(-37.6690, 144.8410),  // Melbourne
-        "LHR" to Pair(51.4700, -0.4543),    // London Heathrow
-        "CDG" to Pair(49.0097, 2.5479),     // Paris CDG
-        "FRA" to Pair(50.0379, 8.5622),     // Frankfurt
-        "AMS" to Pair(52.3105, 4.7683),     // Amsterdam
-        "DXB" to Pair(25.2532, 55.3657),    // Dubai
-        "DOH" to Pair(25.2731, 51.6081),    // Doha
-        "JFK" to Pair(40.6413, -73.7781),   // New York JFK
-        "LAX" to Pair(33.9416, -118.4085),  // Los Angeles
-        "SFO" to Pair(37.6213, -122.3790),  // San Francisco
-        "ORD" to Pair(41.9742, -87.9073),   // Chicago O'Hare
-        "MIA" to Pair(25.7959, -80.2870),   // Miami
-        "YYZ" to Pair(43.6777, -79.6248),   // Toronto
-        "DEL" to Pair(28.5562, 77.1000),    // Delhi
-        "BOM" to Pair(19.0896, 72.8656),    // Mumbai
-        "MNL" to Pair(14.5086, 121.0197),   // Manila
-        "SUB" to Pair(-7.3798, 112.7868),   // Surabaya
-        "JOG" to Pair(-7.7882, 110.4317),   // Yogyakarta
-        "UPG" to Pair(-5.0617, 119.5540),   // Makassar
-    )
+    private var selectedDepartureAirport: Airport? = null
+    private var selectedArrivalAirport: Airport? = null
+
+    fun setTransportMode(mode: String) {
+        _uiState.update { it.copy(transportMode = mode) }
+    }
+
+    fun searchDepartureAirport(query: String) {
+        _uiState.update { it.copy(departureAirportSearch = query) }
+        viewModelScope.launch {
+            val suggestions = if (query.length >= 2) {
+                airportRepository.search(query, 8)
+            } else {
+                emptyList()
+            }
+            _uiState.update {
+                if (it.departureAirportSearch == query) {
+                    it.copy(departureAirportSuggestions = suggestions)
+                } else it
+            }
+        }
+    }
+
+    fun searchArrivalAirport(query: String) {
+        _uiState.update { it.copy(arrivalAirportSearch = query) }
+        viewModelScope.launch {
+            val suggestions = if (query.length >= 2) {
+                airportRepository.search(query, 8)
+            } else {
+                emptyList()
+            }
+            _uiState.update {
+                if (it.arrivalAirportSearch == query) {
+                    it.copy(arrivalAirportSuggestions = suggestions)
+                } else it
+            }
+        }
+    }
+
+    fun selectDepartureAirport(airport: Airport) {
+        selectedDepartureAirport = airport
+        _uiState.update {
+            it.copy(
+                departureAirportCode = airport.iataCode,
+                departureAirportName = airport.name,
+                departureCity = airport.city,
+                departureCountryCode = airport.countryCode,
+                departureAirportSearch = airport.displayName,
+                departureAirportSuggestions = emptyList()
+            )
+        }
+        calculateDistance()
+    }
+
+    fun selectArrivalAirport(airport: Airport) {
+        selectedArrivalAirport = airport
+        _uiState.update {
+            it.copy(
+                arrivalAirportCode = airport.iataCode,
+                arrivalAirportName = airport.name,
+                arrivalCity = airport.city,
+                arrivalCountryCode = airport.countryCode,
+                arrivalAirportSearch = airport.displayName,
+                arrivalAirportSuggestions = emptyList()
+            )
+        }
+        calculateDistance()
+    }
     
     fun updateDepartureAirportCode(code: String) {
         _uiState.update { it.copy(departureAirportCode = code) }
-        calculateDistance()
+        selectedDepartureAirport = null
+        viewModelScope.launch {
+            airportRepository.findByCode(code)?.let(::selectDepartureAirport)
+        }
     }
     
     fun updateDepartureAirportName(name: String) {
@@ -128,7 +178,10 @@ class AddFlightViewModel @Inject constructor(
     
     fun updateArrivalAirportCode(code: String) {
         _uiState.update { it.copy(arrivalAirportCode = code) }
-        calculateDistance()
+        selectedArrivalAirport = null
+        viewModelScope.launch {
+            airportRepository.findByCode(code)?.let(::selectArrivalAirport)
+        }
     }
     
     fun updateArrivalAirportName(name: String) {
@@ -152,7 +205,21 @@ class AddFlightViewModel @Inject constructor(
     }
     
     fun updateFlightNumber(number: String) {
-        _uiState.update { it.copy(flightNumber = number) }
+        val normalized = number.uppercase().replace(" ", "")
+        val prefix = Regex("^([A-Z0-9]{2,3}?)(?=\\d)")
+            .find(normalized)
+            ?.groupValues
+            ?.getOrNull(1)
+        _uiState.update {
+            it.copy(
+                flightNumber = normalized,
+                airline = if (it.airline.isBlank()) {
+                    AIRLINE_NAMES[prefix].orEmpty()
+                } else {
+                    it.airline
+                }
+            )
+        }
     }
     
     fun updateAirline(airline: String) {
@@ -180,14 +247,13 @@ class AddFlightViewModel @Inject constructor(
     }
     
     private fun calculateDistance() {
-        val state = _uiState.value
-        val depCoords = airportCoordinates[state.departureAirportCode]
-        val arrCoords = airportCoordinates[state.arrivalAirportCode]
+        val depCoords = selectedDepartureAirport
+        val arrCoords = selectedArrivalAirport
         
         if (depCoords != null && arrCoords != null) {
             val distance = haversineDistance(
-                depCoords.first, depCoords.second,
-                arrCoords.first, arrCoords.second
+                depCoords.latitude, depCoords.longitude,
+                arrCoords.latitude, arrCoords.longitude
             )
             _uiState.update { it.copy(calculatedDistanceKm = distance) }
         } else {
@@ -220,23 +286,25 @@ class AddFlightViewModel @Inject constructor(
                 val departureTime = combineDateAndTime(
                     state.departureDateMillis!!,
                     state.departureHour,
-                    state.departureMinute
+                    state.departureMinute,
+                    selectedDepartureAirport?.timeZoneId
                 )
                 val arrivalTime = combineDateAndTime(
                     state.arrivalDateMillis!!,
                     state.arrivalHour,
-                    state.arrivalMinute
+                    state.arrivalMinute,
+                    selectedArrivalAirport?.timeZoneId
                 )
                 
                 val durationMinutes = ((arrivalTime - departureTime) / 60000).toInt()
                 
                 val flight = FlightEntity(
                     id = 0, // Auto-generated
-                    departureAirportCode = state.departureAirportCode,
+                    departureAirportCode = state.departureAirportCode.uppercase(),
                     departureAirportName = state.departureAirportName.ifBlank { null },
                     departureCity = state.departureCity.ifBlank { null },
                     departureCountryCode = state.departureCountryCode.ifBlank { null },
-                    arrivalAirportCode = state.arrivalAirportCode,
+                    arrivalAirportCode = state.arrivalAirportCode.uppercase(),
                     arrivalAirportName = state.arrivalAirportName.ifBlank { null },
                     arrivalCity = state.arrivalCity.ifBlank { null },
                     arrivalCountryCode = state.arrivalCountryCode.ifBlank { null },
@@ -253,7 +321,8 @@ class AddFlightViewModel @Inject constructor(
                     photoUri = null,
                     source = "MANUAL",
                     createdAtMillis = System.currentTimeMillis(),
-                    updatedAtMillis = System.currentTimeMillis()
+                    updatedAtMillis = System.currentTimeMillis(),
+                    transportMode = state.transportMode
                 )
                 
                 flightDao.insert(flight)
@@ -270,7 +339,22 @@ class AddFlightViewModel @Inject constructor(
         }
     }
     
-    private fun combineDateAndTime(dateMillis: Long, hour: Int, minute: Int): Long {
+    private fun combineDateAndTime(
+        dateMillis: Long,
+        hour: Int,
+        minute: Int,
+        timeZoneId: String?
+    ): Long {
+        if (!timeZoneId.isNullOrBlank()) {
+            val date = java.time.Instant.ofEpochMilli(dateMillis)
+                .atZone(java.time.ZoneOffset.UTC)
+                .toLocalDate()
+            return date.atTime(hour, minute)
+                .atZone(runCatching { java.time.ZoneId.of(timeZoneId) }
+                    .getOrDefault(java.time.ZoneId.systemDefault()))
+                .toInstant()
+                .toEpochMilli()
+        }
         val calendar = Calendar.getInstance().apply {
             timeInMillis = dateMillis
             set(Calendar.HOUR_OF_DAY, hour)
@@ -309,6 +393,34 @@ class AddFlightViewModel @Inject constructor(
                 bookingReference = bookingRef ?: ""
             )
         }
-        calculateDistance()
+        viewModelScope.launch {
+            airportRepository.findByCode(departureCode)?.let(::selectDepartureAirport)
+            airportRepository.findByCode(arrivalCode)?.let(::selectArrivalAirport)
+        }
+    }
+
+    companion object {
+        private val AIRLINE_NAMES = mapOf(
+            "SQ" to "Singapore Airlines",
+            "GA" to "Garuda Indonesia",
+            "QF" to "Qantas",
+            "EK" to "Emirates",
+            "QR" to "Qatar Airways",
+            "CX" to "Cathay Pacific",
+            "JL" to "Japan Airlines",
+            "NH" to "ANA",
+            "KE" to "Korean Air",
+            "TG" to "Thai Airways",
+            "MH" to "Malaysia Airlines",
+            "AK" to "AirAsia",
+            "TR" to "Scoot",
+            "ID" to "Batik Air",
+            "JT" to "Lion Air",
+            "QG" to "Citilink",
+            "BA" to "British Airways",
+            "LH" to "Lufthansa",
+            "TK" to "Turkish Airlines",
+            "EY" to "Etihad Airways"
+        )
     }
 }

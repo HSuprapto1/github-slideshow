@@ -89,6 +89,12 @@ fun GpsTrackingScreen(
     ) { granted ->
         viewModel.refreshPermissions()
     }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        viewModel.refreshPermissions()
+    }
     
     Scaffold(
         topBar = {
@@ -116,7 +122,10 @@ fun GpsTrackingScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (!uiState.hasLocationPermission || !uiState.hasBackgroundPermission) {
+            if (!uiState.hasLocationPermission ||
+                !uiState.hasBackgroundPermission ||
+                !uiState.hasNotificationPermission
+            ) {
                 item {
                     PermissionCard(
                         hasLocationPermission = uiState.hasLocationPermission,
@@ -136,6 +145,13 @@ fun GpsTrackingScreen(
                                     Manifest.permission.ACCESS_BACKGROUND_LOCATION
                                 )
                             }
+                        },
+                        onRequestNotificationPermission = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                notificationPermissionLauncher.launch(
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                )
+                            }
                         }
                     )
                 }
@@ -152,7 +168,9 @@ fun GpsTrackingScreen(
                     onStop = { viewModel.stopTracking() },
                     onPause = { viewModel.pauseTracking() },
                     onResume = { viewModel.resumeTracking() },
-                    enabled = uiState.hasLocationPermission
+                    enabled = uiState.hasLocationPermission &&
+                        uiState.hasBackgroundPermission &&
+                        uiState.hasNotificationPermission
                 )
             }
             
@@ -192,7 +210,8 @@ private fun PermissionCard(
     hasBackgroundPermission: Boolean,
     hasNotificationPermission: Boolean,
     onRequestLocationPermission: () -> Unit,
-    onRequestBackgroundPermission: () -> Unit
+    onRequestBackgroundPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -235,6 +254,16 @@ private fun PermissionCard(
                     description = "Required to track when app is in background",
                     granted = false,
                     onRequest = onRequestBackgroundPermission
+                )
+            }
+
+            if (!hasNotificationPermission) {
+                Spacer(modifier = Modifier.height(8.dp))
+                PermissionRow(
+                    title = "Notifications",
+                    description = "Required to show that background tracking is active",
+                    granted = false,
+                    onRequest = onRequestNotificationPermission
                 )
             }
         }
@@ -653,7 +682,7 @@ private fun BatteryTipsCard() {
                 "Smart mode balances accuracy with battery life",
                 "Battery Saver mode uses minimal power",
                 "Passive mode has zero battery impact",
-                "Tracking pauses automatically in Doze mode"
+                "Allow background use in Samsung Battery settings for reliable tracking"
             )
             
             tips.forEach { tip ->

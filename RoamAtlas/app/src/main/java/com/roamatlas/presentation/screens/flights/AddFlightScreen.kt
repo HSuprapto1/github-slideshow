@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.flights
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,6 +56,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.local.entity.TransportMode
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -68,10 +72,11 @@ fun AddFlightScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val modeLabel = TransportMode.label(uiState.transportMode)
     
     LaunchedEffect(uiState.flightSaved) {
         if (uiState.flightSaved) {
-            snackbarHostState.showSnackbar("Flight saved successfully!")
+            snackbarHostState.showSnackbar("$modeLabel saved successfully!")
             onFlightAdded()
             onNavigateBack()
         }
@@ -87,7 +92,7 @@ fun AddFlightScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add Flight") },
+                title = { Text("Add $modeLabel") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -112,12 +117,31 @@ fun AddFlightScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Text("Transport", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    TransportMode.FLIGHT,
+                    TransportMode.TRAIN,
+                    TransportMode.BUS
+                ).forEach { mode ->
+                    FilterChip(
+                        selected = uiState.transportMode == mode,
+                        onClick = { viewModel.setTransportMode(mode) },
+                        label = { Text(TransportMode.label(mode)) }
+                    )
+                }
+            }
+
             // Departure Section
             SectionCard(
                 title = "Departure",
                 icon = Icons.Default.FlightTakeoff
             ) {
                 AirportInput(
+                    searchQuery = uiState.departureAirportSearch,
+                    onSearchQueryChange = viewModel::searchDepartureAirport,
+                    suggestions = uiState.departureAirportSuggestions,
+                    onSelectAirport = viewModel::selectDepartureAirport,
                     airportCode = uiState.departureAirportCode,
                     onAirportCodeChange = viewModel::updateDepartureAirportCode,
                     airportName = uiState.departureAirportName,
@@ -146,6 +170,10 @@ fun AddFlightScreen(
                 icon = Icons.Default.FlightLand
             ) {
                 AirportInput(
+                    searchQuery = uiState.arrivalAirportSearch,
+                    onSearchQueryChange = viewModel::searchArrivalAirport,
+                    suggestions = uiState.arrivalAirportSuggestions,
+                    onSelectAirport = viewModel::selectArrivalAirport,
                     airportCode = uiState.arrivalAirportCode,
                     onAirportCodeChange = viewModel::updateArrivalAirportCode,
                     airportName = uiState.arrivalAirportName,
@@ -180,16 +208,48 @@ fun AddFlightScreen(
                     OutlinedTextField(
                         value = uiState.airline,
                         onValueChange = viewModel::updateAirline,
-                        label = { Text("Airline") },
-                        placeholder = { Text("e.g. Singapore Airlines") },
+                        label = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "Operator"
+                                    TransportMode.BUS -> "Operator"
+                                    else -> "Airline"
+                                }
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "e.g. Deutsche Bahn"
+                                    TransportMode.BUS -> "e.g. FlixBus"
+                                    else -> "e.g. Singapore Airlines"
+                                }
+                            )
+                        },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = uiState.flightNumber,
                         onValueChange = viewModel::updateFlightNumber,
-                        label = { Text("Flight #") },
-                        placeholder = { Text("SQ123") },
+                        label = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "Train #"
+                                    TransportMode.BUS -> "Bus #"
+                                    else -> "Flight #"
+                                }
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "ICE 123"
+                                    TransportMode.BUS -> "FX 456"
+                                    else -> "SQ123"
+                                }
+                            )
+                        },
                         modifier = Modifier.weight(0.6f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -207,16 +267,16 @@ fun AddFlightScreen(
                     OutlinedTextField(
                         value = uiState.aircraftType,
                         onValueChange = viewModel::updateAircraftType,
-                        label = { Text("Aircraft") },
-                        placeholder = { Text("Boeing 787") },
+                        label = { Text("Aircraft (optional)") },
+                        placeholder = { Text("Add later if known") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = uiState.seatNumber,
                         onValueChange = viewModel::updateSeatNumber,
-                        label = { Text("Seat") },
-                        placeholder = { Text("12A") },
+                        label = { Text("Seat (optional)") },
+                        placeholder = { Text("After check-in") },
                         modifier = Modifier.weight(0.5f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -237,6 +297,11 @@ fun AddFlightScreen(
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Characters
                     )
+                )
+                Text(
+                    "Aircraft and seat can be left empty and updated after online or airport check-in.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
@@ -293,7 +358,7 @@ fun AddFlightScreen(
                     .height(56.dp),
                 enabled = uiState.isValid && !uiState.isSaving
             ) {
-                Text(if (uiState.isSaving) "Saving..." else "Save Flight")
+                Text(if (uiState.isSaving) "Saving..." else "Save $modeLabel")
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -341,6 +406,10 @@ private fun SectionCard(
 
 @Composable
 private fun AirportInput(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    suggestions: List<Airport>,
+    onSelectAirport: (Airport) -> Unit,
     airportCode: String,
     onAirportCodeChange: (String) -> Unit,
     airportName: String,
@@ -350,6 +419,47 @@ private fun AirportInput(
     countryCode: String,
     onCountryCodeChange: (String) -> Unit
 ) {
+    OutlinedTextField(
+        value = searchQuery,
+        onValueChange = onSearchQueryChange,
+        label = { Text("Find airport") },
+        placeholder = { Text("Search code, airport name, city, or country") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
+    if (suggestions.isNotEmpty()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column {
+                suggestions.forEach { airport ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectAirport(airport) }
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            "${airport.iataCode} · ${airport.name}",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+                        Text(
+                            listOf(airport.city, airport.countryName)
+                                .filter { it.isNotBlank() }
+                                .joinToString(", "),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)

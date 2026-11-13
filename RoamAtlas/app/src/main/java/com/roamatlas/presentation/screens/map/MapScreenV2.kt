@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.map
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -49,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -64,8 +66,10 @@ import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
+import coil.compose.AsyncImage
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
@@ -73,15 +77,33 @@ import com.roamatlas.presentation.theme.DemoData
 import com.roamatlas.presentation.theme.UncertainLocation
 import com.roamatlas.presentation.theme.VerifiedLocation
 import java.time.ZoneId
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreenV2(
+    initialDate: LocalDate? = null,
+    initialCountryCode: String? = null,
+    initialCity: String? = null,
+    initialLocationId: Long? = null,
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
+    var mapLoaded by remember { mutableStateOf(false) }
+    var fullscreenPhotoUri by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialLocationId, initialDate, initialCountryCode, initialCity) {
+        when {
+            initialLocationId != null -> viewModel.focusLocation(initialLocationId)
+            initialDate != null -> viewModel.showLocalDate(
+                initialDate,
+                initialCountryCode,
+                initialCity
+            )
+        }
+    }
     
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
@@ -90,15 +112,22 @@ fun MapScreenV2(
         )
     }
     
-    LaunchedEffect(uiState.mapCenterLat, uiState.mapCenterLng, uiState.mapZoom) {
-        if (uiState.locations.isNotEmpty()) {
-            cameraPositionState.animate(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(uiState.mapCenterLat, uiState.mapCenterLng),
-                    uiState.mapZoom
-                )
+    LaunchedEffect(
+        mapLoaded,
+        uiState.cameraFocusToken,
+        uiState.mapCenterLat,
+        uiState.mapCenterLng,
+        uiState.mapZoom,
+        uiState.selectedLocation?.id
+    ) {
+        if (!mapLoaded) return@LaunchedEffect
+        if (uiState.locations.isEmpty() && uiState.selectedLocation == null) return@LaunchedEffect
+        cameraPositionState.animate(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(uiState.mapCenterLat, uiState.mapCenterLng),
+                uiState.mapZoom
             )
-        }
+        )
     }
     
     Scaffold(
@@ -106,9 +135,26 @@ fun MapScreenV2(
             TopAppBar(
                 title = {
                     Column {
-                        Text("World Map")
                         Text(
-                            text = "${uiState.totalLocations} locations",
+                            when {
+                                initialLocationId != null ->
+                                    uiState.selectedLocation?.city?.let { "$it · Photo" }
+                                        ?: "Photo location"
+                                initialDate != null && initialCity != null ->
+                                    "$initialCity track · $initialDate"
+                                initialDate != null && initialCountryCode == null ->
+                                    "Track · $initialDate"
+                                initialDate != null ->
+                                    "$initialCountryCode track · $initialDate"
+                                else -> "World Map"
+                            }
+                        )
+                        Text(
+                            text = if (initialLocationId != null) {
+                                "1 photo pin"
+                            } else {
+                                "${uiState.totalLocations} locations"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )
@@ -169,30 +215,36 @@ fun MapScreenV2(
                         myLocationButtonEnabled = false,
                         mapToolbarEnabled = true
                     ),
-                    onMapClick = { viewModel.selectLocation(null) }
+                    onMapLoaded = { mapLoaded = true },
+                    onMapClick = {
+                        // Keep the focused photo selected when opened from Photos.
+                        if (initialLocationId == null) {
+                            viewModel.selectLocation(null)
+                        }
+                    }
                 ) {
                     val displayLocations = if (uiState.locations.size > 1000) {
                         uiState.locations.filterIndexed { index, _ -> index % (uiState.locations.size / 1000) == 0 }
                     } else {
                         uiState.locations
                     }
+
+                    // Optional track lines (off by default — map stays readable).
+                    val trackPoints = displayLocations.filter { it.photoUri.isNullOrBlank() }
+                    if (uiState.showTrackLines && trackPoints.size >= 2) {
+                        Polyline(
+                            points = trackPoints.map {
+                                LatLng(it.latitude, it.longitude)
+                            },
+                            color = Color(0xFF1565C0),
+                            width = 7f
+                        )
+                    }
                     
                     displayLocations.forEach { location ->
-                        val markerColor = when (location.source) {
-                            LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
-                            LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
-                            LocationSource.MANUAL_ENTRY -> BitmapDescriptorFactory.HUE_ORANGE
-                        }
-                        
-                        Marker(
-                            state = MarkerState(position = LatLng(location.latitude, location.longitude)),
-                            title = location.city ?: formatTimestamp(location.timestamp),
-                            snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
-                            icon = BitmapDescriptorFactory.defaultMarker(markerColor),
-                            onClick = {
-                                viewModel.selectLocation(location)
-                                true
-                            }
+                        LocationMapMarker(
+                            location = location,
+                            onClick = { viewModel.selectLocation(location) }
                         )
                     }
                 }
@@ -207,7 +259,19 @@ fun MapScreenV2(
                 FilterBar(
                     countryCodes = uiState.countryCodes,
                     selectedCountry = uiState.filterCountryCode,
+                    showGps = uiState.showGps,
+                    showTimeline = uiState.showTimeline,
+                    showPhoto = uiState.showPhoto,
+                    showTrackLines = uiState.showTrackLines,
                     onCountrySelected = { viewModel.setCountryFilter(it) },
+                    onSourceFilterChange = { gps, timeline, photo ->
+                        viewModel.setSourceFilters(
+                            showGps = gps,
+                            showTimeline = timeline,
+                            showPhoto = photo
+                        )
+                    },
+                    onTrackLinesChange = { viewModel.setShowTrackLines(it) },
                     onClearFilters = { viewModel.clearFilters() }
                 )
             }
@@ -221,16 +285,35 @@ fun MapScreenV2(
                 uiState.selectedLocation?.let { location ->
                     LocationDetailCard(
                         location = location,
-                        onClose = { viewModel.selectLocation(null) }
+                        galleryStyle = !location.photoUri.isNullOrBlank(),
+                        onOpenFullPhoto = { uri -> fullscreenPhotoUri = uri },
+                        onClose = {
+                            // Dismiss the photo sheet so the map/pin is visible.
+                            viewModel.selectLocation(null)
+                            fullscreenPhotoUri = null
+                        }
                     )
                 }
+            }
+
+            fullscreenPhotoUri?.let { uri ->
+                FullscreenPhotoViewer(
+                    photoUri = uri,
+                    onDismiss = { fullscreenPhotoUri = null }
+                )
             }
             
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
-                    .padding(bottom = if (uiState.selectedLocation != null) 160.dp else 0.dp),
+                    .padding(
+                        bottom = when {
+                            uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 360.dp
+                            uiState.selectedLocation != null -> 160.dp
+                            else -> 0.dp
+                        }
+                    ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FloatingActionButton(
@@ -303,7 +386,13 @@ private fun EmptyMapView() {
 private fun FilterBar(
     countryCodes: List<String>,
     selectedCountry: String?,
+    showGps: Boolean,
+    showTimeline: Boolean,
+    showPhoto: Boolean,
+    showTrackLines: Boolean,
     onCountrySelected: (String?) -> Unit,
+    onSourceFilterChange: (Boolean, Boolean, Boolean) -> Unit,
+    onTrackLinesChange: (Boolean) -> Unit,
     onClearFilters: () -> Unit
 ) {
     Surface(
@@ -312,7 +401,8 @@ private fun FilterBar(
         shadowElevation = 4.dp
     ) {
         Column(
-            modifier = Modifier.padding(12.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -320,25 +410,79 @@ private fun FilterBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Filter by Country",
+                    text = "Map filters",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
-                if (selectedCountry != null) {
-                    Text(
-                        text = "Clear",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onClearFilters() }
+                Text(
+                    text = "Clear",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onClearFilters() }
+                )
+            }
+
+            Text(
+                text = "Source",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = showTimeline,
+                        onClick = {
+                            onSourceFilterChange(showGps, !showTimeline, showPhoto)
+                        },
+                        label = { Text("History") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = showGps,
+                        onClick = {
+                            onSourceFilterChange(!showGps, showTimeline, showPhoto)
+                        },
+                        label = { Text("GPS") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = showPhoto,
+                        onClick = {
+                            onSourceFilterChange(showGps, showTimeline, !showPhoto)
+                        },
+                        label = { Text("Photo") }
                     )
                 }
             }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+
+            Text(
+                text = "Display",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = showTrackLines,
+                        onClick = { onTrackLinesChange(!showTrackLines) },
+                        label = { Text("Track lines") }
+                    )
+                }
+            }
+            Text(
+                text = "Track lines connect GPS/history points. Leave off for a clearer map.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                text = "Country",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(countryCodes) { code ->
                     FilterChip(
                         selected = code == selectedCountry,
@@ -356,10 +500,45 @@ private fun FilterBar(
 }
 
 @Composable
+private fun LocationMapMarker(
+    location: LocationRecord,
+    onClick: () -> Unit
+) {
+    val hasPhoto = !location.photoUri.isNullOrBlank()
+    val markerColor = when (location.source) {
+        LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
+        LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
+        LocationSource.MANUAL_ENTRY -> BitmapDescriptorFactory.HUE_ORANGE
+    }
+    val markerIcon = if (hasPhoto) {
+        rememberPhotoMarkerIcon(location.photoUri)
+    } else {
+        BitmapDescriptorFactory.defaultMarker(markerColor)
+    }
+
+    Marker(
+        state = MarkerState(position = LatLng(location.latitude, location.longitude)),
+        title = buildString {
+            if (hasPhoto) append("Photo · ")
+            append(location.city ?: formatTimestamp(location.timestamp))
+        },
+        snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
+        icon = markerIcon,
+        onClick = {
+            onClick()
+            true
+        }
+    )
+}
+
+@Composable
 private fun LocationDetailCard(
     location: LocationRecord,
+    galleryStyle: Boolean = false,
+    onOpenFullPhoto: (String) -> Unit = {},
     onClose: () -> Unit
 ) {
+    val fullPhotoUri = location.fullPhotoUri()
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -396,6 +575,27 @@ private fun LocationDetailCard(
             }
             
             Spacer(modifier = Modifier.height(12.dp))
+
+            fullPhotoUri?.let { photoUri ->
+                AsyncImage(
+                    model = Uri.parse(photoUri),
+                    contentDescription = "Photo for this timeline point",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (galleryStyle) 280.dp else 180.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.92f))
+                        .clickable { onOpenFullPhoto(photoUri) }
+                )
+                Text(
+                    text = "Tap photo for full gallery view",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -481,8 +681,8 @@ private fun MapLegend(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             LegendItem(color = Color(0xFF4285F4), label = "GPS")
-            LegendItem(color = Color(0xFF34A853), label = "Timeline")
-            LegendItem(color = Color(0xFFFBBC05), label = "Manual")
+            LegendItem(color = Color(0xFF34A853), label = "History")
+            LegendItem(color = Color(0xFF9C27B0), label = "Photo")
         }
     }
 }
@@ -505,6 +705,51 @@ private fun LegendItem(color: Color, label: String) {
         )
     }
 }
+
+@Composable
+private fun FullscreenPhotoViewer(
+    photoUri: String,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // Background tap closes; keep this behind the close button so × always works.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
+        AsyncImage(
+            model = Uri.parse(photoUri),
+            contentDescription = "Full photo",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)
+                .align(Alignment.Center)
+                .clickable(onClick = onDismiss)
+        )
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close",
+                tint = Color.White
+            )
+        }
+    }
+}
+
+private fun LocationRecord.fullPhotoUri(): String? =
+    originalPhotoUri?.takeIf { it.isNotBlank() }
+        ?: photoUri?.takeIf { it.isNotBlank() }
 
 private fun getFlagEmoji(countryCode: String): String {
     if (countryCode.length != 2) return countryCode

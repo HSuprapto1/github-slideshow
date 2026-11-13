@@ -1,10 +1,12 @@
 package com.roamatlas.presentation.components
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,13 +14,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -28,12 +28,14 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,8 +48,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
 
 /**
  * Photo attachment component for adding photos to flights, trips, or locations.
@@ -58,23 +62,58 @@ fun PhotoAttachmentSection(
     onAddPhoto: (Uri) -> Unit,
     onRemovePhoto: (String) -> Unit,
     modifier: Modifier = Modifier,
-    maxPhotos: Int = 10
+    title: String = "Photos",
+    maxPhotos: Int = 10,
+    enableCamera: Boolean = true,
+    onPhotoClick: ((String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var showSourceDialog by remember { mutableStateOf(false) }
-    
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { onAddPhoto(it) }
     }
-    
+
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        // Handle camera result
-        // Note: For camera, you need to create a temp file URI before launching
+    ) { saved ->
+        val uri = pendingCameraUri
+        if (saved && uri != null) {
+            onAddPhoto(uri)
+        } else if (uri != null) {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+        pendingCameraUri = null
     }
-    
+
+    fun launchCamera() {
+        val uri = createPlaceCameraPhotoUri(context)
+        if (uri == null) {
+            Toast.makeText(context, "Could not open camera", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchCamera()
+        else Toast.makeText(context, "Camera permission needed", Toast.LENGTH_SHORT).show()
+    }
+
+    fun startCamera() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
     Column(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -82,7 +121,7 @@ fun PhotoAttachmentSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Photos",
+                text = title,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -92,43 +131,80 @@ fun PhotoAttachmentSection(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
-        
+
         Spacer(modifier = Modifier.height(8.dp))
-        
+
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 4.dp)
         ) {
-            // Add photo button
             if (photos.size < maxPhotos) {
                 item {
                     AddPhotoButton(
-                        onGalleryClick = { galleryLauncher.launch("image/*") },
-                        onCameraClick = { /* Launch camera */ }
+                        onClick = {
+                            if (enableCamera) showSourceDialog = true
+                            else galleryLauncher.launch("image/*")
+                        }
                     )
                 }
             }
-            
-            // Existing photos
+
             items(photos) { photoUri ->
                 PhotoThumbnail(
                     uri = photoUri,
-                    onRemove = { onRemovePhoto(photoUri) }
+                    onRemove = { onRemovePhoto(photoUri) },
+                    onClick = onPhotoClick?.let { handler -> { handler(photoUri) } }
                 )
             }
         }
+    }
+
+    if (showSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showSourceDialog = false },
+            title = { Text("Add photo") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showSourceDialog = false
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("Gallery")
+                    }
+                    TextButton(
+                        onClick = {
+                            showSourceDialog = false
+                            startCamera()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("Camera")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSourceDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
 @Composable
 private fun AddPhotoButton(
-    onGalleryClick: () -> Unit,
-    onCameraClick: () -> Unit
+    onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .size(100.dp)
-            .clickable { onGalleryClick() },
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
@@ -160,14 +236,18 @@ private fun AddPhotoButton(
 @Composable
 private fun PhotoThumbnail(
     uri: String,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    
+
     Box(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+            )
     ) {
         AsyncImage(
             model = ImageRequest.Builder(context)
@@ -178,8 +258,7 @@ private fun PhotoThumbnail(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-        
-        // Remove button
+
         IconButton(
             onClick = onRemove,
             modifier = Modifier
@@ -211,7 +290,7 @@ fun PhotoGalleryPreview(
     modifier: Modifier = Modifier
 ) {
     if (photos.isEmpty()) return
-    
+
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -219,7 +298,7 @@ fun PhotoGalleryPreview(
     ) {
         items(photos.size) { index ->
             val context = LocalContext.current
-            
+
             Card(
                 modifier = Modifier
                     .size(80.dp)
@@ -251,13 +330,17 @@ fun PhotoFullScreenViewer(
 ) {
     var currentIndex by remember { mutableStateOf(initialIndex) }
     val context = LocalContext.current
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable { onDismiss() }
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(photos.getOrNull(currentIndex))
@@ -266,11 +349,11 @@ fun PhotoFullScreenViewer(
             contentDescription = "Photo",
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .clickable(onClick = onDismiss),
             contentScale = ContentScale.Fit
         )
-        
-        // Close button
+
         IconButton(
             onClick = onDismiss,
             modifier = Modifier
@@ -284,8 +367,7 @@ fun PhotoFullScreenViewer(
                 modifier = Modifier.size(32.dp)
             )
         }
-        
-        // Photo counter
+
         if (photos.size > 1) {
             Text(
                 text = "${currentIndex + 1} / ${photos.size}",

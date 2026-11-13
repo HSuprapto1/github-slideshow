@@ -1,0 +1,7 @@
+Natural Earth country boundaries are in the public domain.
+Source: https://www.naturalearthdata.com/
+
+City names and coordinates are derived from GeoNames cities15000.
+GeoNames data is licensed under Creative Commons Attribution 4.0.
+Source: https://www.geonames.org/
+License: https://creativecommons.org/licenses/by/4.0/

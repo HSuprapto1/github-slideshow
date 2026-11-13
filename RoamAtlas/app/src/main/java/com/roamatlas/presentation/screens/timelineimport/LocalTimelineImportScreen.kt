@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -113,11 +114,21 @@ fun LocalTimelineImportScreen(
                         modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        CircularProgressIndicator()
+                        val progress = uiState.progress
+                        if (progress != null && progress.percent > 0) {
+                            LinearProgressIndicator(
+                                progress = { progress.percent / 100f },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            CircularProgressIndicator()
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Reading your Timeline…")
+                        Text(progress?.message ?: "Reading your Timeline…")
                         Text(
-                            "A long history can take a minute.",
+                            progress?.let {
+                                "${it.percent}% • ${it.processed} read • ${it.imported} new"
+                            } ?: "A long history can take several minutes.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )

@@ -2,8 +2,15 @@ package com.roamatlas.data.timeline
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import androidx.room.withTransaction
+import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import com.roamatlas.data.geo.OfflineGeoResolver
+import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.local.entity.LocationEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -11,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FilterInputStream
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,7 +28,9 @@ import javax.inject.Singleton
 @Singleton
 class LocalTimelineImporter @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val locationDao: LocationDao
+    private val database: RoamAtlasDatabase,
+    private val locationDao: LocationDao,
+    private val geoResolver: OfflineGeoResolver
 ) {
     
     data class ImportResult(
@@ -28,8 +40,18 @@ class LocalTimelineImporter @Inject constructor(
         val errors: List<String>,
         val message: String
     )
+
+    data class ImportProgress(
+        val percent: Int,
+        val processed: Int,
+        val imported: Int,
+        val message: String
+    )
     
-    suspend fun importFromFolder(folderUri: Uri): ImportResult = withContext(Dispatchers.IO) {
+    suspend fun importFromFolder(
+        folderUri: Uri,
+        onProgress: (ImportProgress) -> Unit = {}
+    ): ImportResult = withContext(Dispatchers.IO) {
         val errors = mutableListOf<String>()
         var locationsImported = 0
         var placesFound = 0
@@ -49,7 +71,7 @@ class LocalTimelineImporter @Inject constructor(
             
             for (jsonFile in jsonFiles) {
                 try {
-                    val result = processJsonFile(jsonFile)
+                    val result = processJsonFile(jsonFile, onProgress)
                     locationsImported += result.first
                     placesFound += result.second
                 } catch (e: Exception) {
@@ -73,23 +95,14 @@ class LocalTimelineImporter @Inject constructor(
         }
     }
     
-    suspend fun importFromFile(fileUri: Uri): ImportResult = withContext(Dispatchers.IO) {
+    suspend fun importFromFile(
+        fileUri: Uri,
+        onProgress: (ImportProgress) -> Unit = {}
+    ): ImportResult = withContext(Dispatchers.IO) {
         try {
-            val inputStream = context.contentResolver.openInputStream(fileUri)
-                ?: return@withContext ImportResult(false, 0, 0, listOf("Cannot open file"), "Failed")
-            
-            val content = inputStream.bufferedReader().use { it.readText() }
-            inputStream.close()
-            
-            val saved = saveParsedContent(content)
-            
-            ImportResult(
-                success = saved.inserted > 0,
-                locationsImported = saved.inserted,
-                placesFound = saved.places,
-                errors = emptyList(),
-                message = saved.message
-            )
+            importStream(fileUri, onProgress)
+        } catch (_: LegacyTimelineFormatException) {
+            importLegacyFile(fileUri)
         } catch (e: Exception) {
             ImportResult(false, 0, 0, listOf(e.message ?: "Unknown"), "Failed: ${e.message}")
         }
@@ -106,13 +119,152 @@ class LocalTimelineImporter @Inject constructor(
         }
     }
     
-    private suspend fun processJsonFile(file: DocumentFile): Pair<Int, Int> {
-        val inputStream = context.contentResolver.openInputStream(file.uri) ?: return Pair(0, 0)
-        val content = inputStream.bufferedReader().use { it.readText() }
-        inputStream.close()
-        
+    private suspend fun processJsonFile(
+        file: DocumentFile,
+        onProgress: (ImportProgress) -> Unit
+    ): Pair<Int, Int> {
+        val result = importStream(file.uri, onProgress)
+        return Pair(result.locationsImported, result.placesFound)
+    }
+
+    private suspend fun importStream(
+        uri: Uri,
+        onProgress: (ImportProgress) -> Unit
+    ): ImportResult {
+        val totalBytes = querySize(uri)
+        val input = context.contentResolver.openInputStream(uri)
+            ?: return ImportResult(false, 0, 0, listOf("Cannot open file"), "Failed")
+        val counting = CountingInputStream(input)
+        var processed = 0
+        var imported = 0
+        var places = 0
+        var skipped = 0
+        val batch = ArrayList<LocationEntity>(INSERT_BATCH_SIZE)
+
+        fun progress(message: String) {
+            val percent = if (totalBytes > 0) {
+                ((counting.bytesRead * 100L) / totalBytes).toInt().coerceIn(0, 99)
+            } else 0
+            onProgress(ImportProgress(percent, processed, imported, message))
+        }
+
+        suspend fun flush() {
+            if (batch.isEmpty()) return
+            imported += locationDao.insertAll(batch).count { it != -1L }
+            batch.clear()
+            progress("Saving and identifying countries…")
+        }
+
+        database.withTransaction {
+            counting.use { stream ->
+                JsonReader(InputStreamReader(stream)).use { reader ->
+                    reader.isLenient = true
+
+                    suspend fun addPoints(points: List<OnDeviceTimelineParser.Point>) {
+                        for (point in points) {
+                            processed++
+                            batch.add(point.toEntity())
+                            if (batch.size >= INSERT_BATCH_SIZE) flush()
+                        }
+                    }
+
+                    when (reader.peek()) {
+                        JsonToken.BEGIN_OBJECT -> {
+                            var recognized = false
+                            var semanticPointsFound = false
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                when (reader.nextName()) {
+                                    "semanticSegments" -> {
+                                        recognized = true
+                                        reader.beginArray()
+                                        while (reader.hasNext()) {
+                                            val segment = JsonParser.parseReader(reader).asJsonObject
+                                            val parsed = OnDeviceTimelineParser.parseSegment(segment)
+                                            if (parsed.points.isEmpty()) skipped++
+                                            if (parsed.points.isNotEmpty()) semanticPointsFound = true
+                                            places += parsed.places
+                                            addPoints(parsed.points)
+                                        }
+                                        reader.endArray()
+                                    }
+                                    "rawSignals" -> {
+                                        recognized = true
+                                        if (semanticPointsFound) {
+                                            reader.skipValue()
+                                        } else {
+                                            reader.beginArray()
+                                            while (reader.hasNext()) {
+                                                val signal = JsonParser.parseReader(reader).asJsonObject
+                                                val point = OnDeviceTimelineParser.parseRawSignal(signal)
+                                                if (point == null) skipped++ else addPoints(listOf(point))
+                                            }
+                                            reader.endArray()
+                                        }
+                                    }
+                                    "userLocationProfile" -> reader.skipValue()
+                                    "locations", "timelineObjects" ->
+                                        throw LegacyTimelineFormatException()
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                            if (!recognized) throw LegacyTimelineFormatException()
+                        }
+                        JsonToken.BEGIN_ARRAY -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                val segment = JsonParser.parseReader(reader).asJsonObject
+                                val parsed = OnDeviceTimelineParser.parseSegment(segment)
+                                if (parsed.points.isEmpty()) skipped++
+                                places += parsed.places
+                                addPoints(parsed.points)
+                            }
+                            reader.endArray()
+                        }
+                        else -> throw LegacyTimelineFormatException()
+                    }
+                    flush()
+                }
+            }
+        }
+        onProgress(ImportProgress(100, processed, imported, "Import complete"))
+        val duplicates = processed - imported
+        val message = if (imported > 0) {
+            "Saved $imported locations with country and city information." +
+                if (duplicates > 0) " Skipped $duplicates already saved locations." else ""
+        } else if (processed > 0) {
+            "All $processed locations were already saved in RoamAtlas."
+        } else {
+            "No locations were found in that Timeline file."
+        }
+        return ImportResult(
+            success = processed > 0,
+            locationsImported = imported,
+            placesFound = places,
+            errors = if (skipped > 0) listOf("$skipped unsupported Timeline records skipped") else emptyList(),
+            message = message
+        )
+    }
+
+    private suspend fun importLegacyFile(uri: Uri): ImportResult {
+        val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            ?: return ImportResult(false, 0, 0, listOf("Cannot open file"), "Failed")
         val saved = saveParsedContent(content)
-        return Pair(saved.inserted, saved.places)
+        return ImportResult(
+            success = saved.inserted > 0,
+            locationsImported = saved.inserted,
+            placesFound = saved.places,
+            errors = emptyList(),
+            message = saved.message
+        )
+    }
+
+    private fun querySize(uri: Uri): Long {
+        return context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0) else -1L
+            } ?: -1L
     }
 
     private data class Saved(
@@ -159,6 +311,7 @@ class LocalTimelineImporter @Inject constructor(
 
     private fun OnDeviceTimelineParser.Point.toEntity(): LocationEntity {
         val now = System.currentTimeMillis()
+        val place = geoResolver.resolve(latitude, longitude)
         return LocationEntity(
             id = 0,
             latitude = latitude,
@@ -168,12 +321,14 @@ class LocalTimelineImporter @Inject constructor(
             accuracy = accuracy,
             altitude = altitude,
             speed = speed,
-            countryCode = null,
-            countryName = null,
-            city = city,
+            countryCode = place.countryCode,
+            countryName = place.countryName,
+            city = city ?: place.city,
             confidence = confidence,
             originalSourceId = originalSourceId,
             notes = notes,
+            photoUri = null,
+            originalPhotoUri = null,
             createdAtMillis = now,
             updatedAtMillis = now
         )
@@ -240,12 +395,16 @@ class LocalTimelineImporter @Inject constructor(
         val dur = pv.optJSONObject("duration")
         val ts = parseTimestamp(dur?.optString("startTimestamp") ?: dur?.optString("startTimestampMs"))
         
+        val place = geoResolver.resolve(lat, lon)
         return LocationEntity(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
-            countryCode = null, countryName = null, city = loc.optString("name", null),
+            countryCode = place.countryCode, countryName = place.countryName,
+            city = loc.optString("name", null) ?: place.city,
             confidence = "VERIFIED", originalSourceId = "pv_$ts",
-            notes = loc.optString("address", null), createdAtMillis = now, updatedAtMillis = now
+            notes = loc.optString("address", null), photoUri = null,
+            originalPhotoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     
@@ -258,12 +417,15 @@ class LocalTimelineImporter @Inject constructor(
             if (lat != 0.0 || lon != 0.0) {
                 val dur = seg.optJSONObject("duration")
                 val ts = parseTimestamp(dur?.optString("startTimestamp"))
+                val place = geoResolver.resolve(lat, lon)
                 result.add(LocationEntity(
                     id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
                     source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
-                    countryCode = null, countryName = null, city = null,
+                    countryCode = place.countryCode, countryName = place.countryName, city = place.city,
                     confidence = "UNCERTAIN", originalSourceId = "seg_$ts",
-                    notes = null, createdAtMillis = now, updatedAtMillis = now
+                    notes = null, photoUri = null,
+            originalPhotoUri = null,
+                    createdAtMillis = now, updatedAtMillis = now
                 ))
             }
         }
@@ -282,13 +444,16 @@ class LocalTimelineImporter @Inject constructor(
         
         val ts = parseTimestamp(loc.optString("timestamp", null) ?: loc.optString("timestampMs", null))
         val acc = loc.optInt("accuracy", -1).takeIf { it > 0 }?.toFloat()
+        val place = geoResolver.resolve(lat, lon)
         
         return LocationEntity(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = acc, altitude = loc.optDouble("altitude", Double.NaN).takeIf { !it.isNaN() },
-            speed = null, countryCode = null, countryName = null, city = null,
+            speed = null, countryCode = place.countryCode, countryName = place.countryName, city = place.city,
             confidence = if (acc != null && acc < 50) "VERIFIED" else "UNCERTAIN",
-            originalSourceId = "rec_$ts", notes = null, createdAtMillis = now, updatedAtMillis = now
+            originalSourceId = "rec_$ts", notes = null, photoUri = null,
+            originalPhotoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     
@@ -304,13 +469,17 @@ class LocalTimelineImporter @Inject constructor(
         if (lat == 0.0 && lon == 0.0) return null
         
         val ts = parseTimestamp(obj.optString("timestamp", null) ?: obj.optString("time", null))
+        val place = geoResolver.resolve(lat, lon)
         
         return LocationEntity(
             id = 0, latitude = lat, longitude = lon, timestampMillis = ts,
             source = "GOOGLE_TIMELINE", accuracy = null, altitude = null, speed = null,
-            countryCode = null, countryName = null, city = obj.optString("name", null),
+            countryCode = place.countryCode, countryName = place.countryName,
+            city = obj.optString("name", null) ?: place.city,
             confidence = "UNCERTAIN", originalSourceId = "gen_$ts",
-            notes = obj.optString("address", null), createdAtMillis = now, updatedAtMillis = now
+            notes = obj.optString("address", null), photoUri = null,
+            originalPhotoUri = null,
+            createdAtMillis = now, updatedAtMillis = now
         )
     }
     
@@ -326,5 +495,26 @@ class LocalTimelineImporter @Inject constructor(
         } catch (e: Exception) {
             System.currentTimeMillis()
         }
+    }
+
+    private class LegacyTimelineFormatException : Exception()
+
+    private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
+        var bytesRead: Long = 0
+            private set
+
+        override fun read(): Int {
+            return super.read().also { if (it >= 0) bytesRead++ }
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            return super.read(buffer, offset, length).also {
+                if (it > 0) bytesRead += it
+            }
+        }
+    }
+
+    companion object {
+        private const val INSERT_BATCH_SIZE = 500
     }
 }

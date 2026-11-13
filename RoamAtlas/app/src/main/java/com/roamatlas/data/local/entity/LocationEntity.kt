@@ -30,6 +30,8 @@ data class LocationEntity(
     val confidence: String,
     val originalSourceId: String?,
     val notes: String?,
+    val photoUri: String? = null,
+    val originalPhotoUri: String? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long
 )

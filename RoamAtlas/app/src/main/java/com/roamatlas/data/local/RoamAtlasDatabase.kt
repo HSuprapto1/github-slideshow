@@ -5,6 +5,7 @@ import androidx.room.RoomDatabase
 import com.roamatlas.data.local.dao.DayTrackerDao
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.LocationDao
+import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.dao.UserSettingsDao
 import com.roamatlas.data.local.entity.DayTrackerEntity
 import com.roamatlas.data.local.entity.FlightEntity
@@ -20,12 +21,13 @@ import com.roamatlas.data.local.entity.UserSettingsEntity
         TripEntity::class,
         UserSettingsEntity::class
     ],
-    version = 2,
+    version = 6,
     exportSchema = true
 )
 abstract class RoamAtlasDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
     abstract fun dayTrackerDao(): DayTrackerDao
     abstract fun flightDao(): FlightDao
+    abstract fun tripDao(): TripDao
     abstract fun userSettingsDao(): UserSettingsDao
 }

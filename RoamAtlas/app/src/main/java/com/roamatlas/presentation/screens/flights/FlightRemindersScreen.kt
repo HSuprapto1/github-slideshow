@@ -19,24 +19,34 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +55,7 @@ fun FlightRemindersScreen(
     viewModel: FlightRemindersViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val upcoming by viewModel.upcomingFlight.collectAsState()
     
     Scaffold(
         topBar = {
@@ -73,6 +84,11 @@ fun FlightRemindersScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            UpcomingFlightCard(
+                state = upcoming,
+                onSaveAirportDetails = viewModel::updateAirportBoardDetails
+            )
+
             // Main toggle
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -137,10 +153,10 @@ fun FlightRemindersScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "• Monitors your location before upcoming flights\n" +
-                               "• Calculates travel time to the airport\n" +
-                               "• Reminds you when to leave based on traffic\n" +
-                               "• Warns if you might miss your flight\n" +
-                               "• Detects cancelled/rescheduled flights",
+                               "• Gives a distance-based departure estimate\n" +
+                               "• Opens Google Maps for current traffic\n" +
+                               "• Warns if your location suggests you may miss the flight\n" +
+                               "• Links to live airline status; it does not guess cancellations",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -246,6 +262,199 @@ fun FlightRemindersScreen(
         }
     }
 }
+
+@Composable
+private fun UpcomingFlightCard(
+    state: UpcomingFlightState,
+    onSaveAirportDetails: (Long, String, String) -> Unit
+) {
+    val flight = state.flight
+    var showAirportDetailsDialog by remember { mutableStateOf(false) }
+    var terminalInput by remember { mutableStateOf("") }
+    var gateInput by remember { mutableStateOf("") }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = if (state.isTransit) "Your next transit flight" else "Your next flight",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (flight == null) {
+                Text("No future flight is saved yet.")
+                Text(
+                    "Add a flight manually or import one from Gmail.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                return@Column
+            }
+            val time = SimpleDateFormat("EEE, d MMM yyyy • HH:mm", Locale.getDefault())
+                .format(Date(flight.departureTimeMillis))
+            val flightLabel = listOfNotNull(flight.airline, flight.flightNumber)
+                .joinToString(" • ")
+                .ifBlank { "Flight details not supplied" }
+            Text(flightLabel, fontWeight = FontWeight.SemiBold)
+            Text("${flight.departureAirportCode} → ${flight.arrivalAirportCode}")
+            Text("Departure: $time")
+            Text("Leaves in ${formatRemainingTime(state.minutesUntilDeparture)}")
+            if (state.isTransit && state.transitMinutesRemaining != null) {
+                Text(
+                    "Transit time remaining: ${formatRemainingTime(state.transitMinutesRemaining)}",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            flight.seatNumber?.takeIf { it.isNotBlank() }?.let { Text("Seat: $it") }
+            val gate = noteValue(flight.notes, "Departure gate")
+            val terminal = noteValue(flight.notes, "Departure terminal")
+            val automaticGate = noteValue(flight.notes, "Automatic departure gate")
+            val automaticTerminal = noteValue(flight.notes, "Automatic departure terminal")
+            val airportDetailsSource = noteValue(flight.notes, "Airport details source")
+            val gateConflict = valuesDiffer(gate, automaticGate)
+            val terminalConflict = valuesDiffer(terminal, automaticTerminal)
+            Text(
+                buildString {
+                    if (terminal != null) append("Terminal $terminal • ")
+                    append(gate?.let { "Gate $it" }
+                        ?: "Gate not available—check the airline or airport display")
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                airportDetailsSource?.let { "Source: $it" }
+                    ?: "Gate information is shown only when found in your booking email or entered from the airport board.",
+                style = MaterialTheme.typography.labelSmall
+            )
+            if (automaticGate != null || automaticTerminal != null) {
+                Text(
+                    buildString {
+                        append("Latest automatic information: ")
+                        append(
+                            listOfNotNull(
+                                automaticTerminal?.let { "Terminal $it" },
+                                automaticGate?.let { "Gate $it" }
+                            ).joinToString(" • ")
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (gateConflict || terminalConflict) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Airport information does not match",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        if (gateConflict) {
+                            Text("You entered Gate $gate. Automatic information says Gate $automaticGate.")
+                        }
+                        if (terminalConflict) {
+                            Text(
+                                "You entered Terminal $terminal. Automatic information says Terminal $automaticTerminal."
+                            )
+                        }
+                        Text(
+                            "Please find the nearest airport departure board and check again.",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    terminalInput = terminal.orEmpty()
+                    gateInput = gate.orEmpty()
+                    showAirportDetailsDialog = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Update from airport board")
+            }
+        }
+    }
+
+    if (showAirportDetailsDialog && flight != null) {
+        AlertDialog(
+            onDismissRequest = { showAirportDetailsDialog = false },
+            title = { Text("Update airport details") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Enter exactly what you see on the airport departure board. You can leave either field empty."
+                    )
+                    OutlinedTextField(
+                        value = terminalInput,
+                        onValueChange = { terminalInput = it },
+                        label = { Text("Terminal") },
+                        placeholder = { Text("Example: 3") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = gateInput,
+                        onValueChange = { gateInput = it },
+                        label = { Text("Gate") },
+                        placeholder = { Text("Example: A12") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSaveAirportDetails(flight.id, terminalInput, gateInput)
+                        showAirportDetailsDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAirportDetailsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+private fun formatRemainingTime(minutes: Long): String {
+    val days = minutes / (24 * 60)
+    val hours = (minutes % (24 * 60)) / 60
+    val remainingMinutes = minutes % 60
+    return buildList {
+        if (days > 0) add("${days}d")
+        if (hours > 0 || days > 0) add("${hours}h")
+        add("${remainingMinutes}m")
+    }.joinToString(" ")
+}
+
+private fun noteValue(notes: String?, label: String): String? =
+    notes?.lineSequence()
+        ?.firstOrNull { it.startsWith("$label:", ignoreCase = true) }
+        ?.substringAfter(':')
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+private fun valuesDiffer(manual: String?, automatic: String?): Boolean =
+    !manual.isNullOrBlank() &&
+        !automatic.isNullOrBlank() &&
+        !manual.equals(automatic, ignoreCase = true)
 
 @Composable
 private fun SectionHeader(
