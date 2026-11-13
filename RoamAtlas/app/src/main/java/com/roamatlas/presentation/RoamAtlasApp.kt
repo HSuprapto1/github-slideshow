@@ -301,7 +301,16 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.JourneyDetail.route) {
                     JourneyDetailScreen(
-                        onNavigateBack = { navController.popBackStack() }
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode ->
+                            if (!countryCode.isNullOrBlank()) {
+                                navController.navigate(
+                                    Screen.Map.forCountryDate(date.toString(), countryCode)
+                                )
+                            } else {
+                                navController.navigate(Screen.Map.forDate(date.toString()))
+                            }
+                        }
                     )
                 }
                 composable(Screen.LocalTimelineImport.route) {

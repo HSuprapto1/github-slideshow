@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.local.entity.TransportMode
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -70,10 +72,11 @@ fun AddFlightScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val modeLabel = TransportMode.label(uiState.transportMode)
     
     LaunchedEffect(uiState.flightSaved) {
         if (uiState.flightSaved) {
-            snackbarHostState.showSnackbar("Flight saved successfully!")
+            snackbarHostState.showSnackbar("$modeLabel saved successfully!")
             onFlightAdded()
             onNavigateBack()
         }
@@ -89,7 +92,7 @@ fun AddFlightScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add Flight") },
+                title = { Text("Add $modeLabel") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -114,6 +117,21 @@ fun AddFlightScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Text("Transport", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    TransportMode.FLIGHT,
+                    TransportMode.TRAIN,
+                    TransportMode.BUS
+                ).forEach { mode ->
+                    FilterChip(
+                        selected = uiState.transportMode == mode,
+                        onClick = { viewModel.setTransportMode(mode) },
+                        label = { Text(TransportMode.label(mode)) }
+                    )
+                }
+            }
+
             // Departure Section
             SectionCard(
                 title = "Departure",
@@ -190,16 +208,48 @@ fun AddFlightScreen(
                     OutlinedTextField(
                         value = uiState.airline,
                         onValueChange = viewModel::updateAirline,
-                        label = { Text("Airline") },
-                        placeholder = { Text("e.g. Singapore Airlines") },
+                        label = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "Operator"
+                                    TransportMode.BUS -> "Operator"
+                                    else -> "Airline"
+                                }
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "e.g. Deutsche Bahn"
+                                    TransportMode.BUS -> "e.g. FlixBus"
+                                    else -> "e.g. Singapore Airlines"
+                                }
+                            )
+                        },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = uiState.flightNumber,
                         onValueChange = viewModel::updateFlightNumber,
-                        label = { Text("Flight #") },
-                        placeholder = { Text("SQ123") },
+                        label = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "Train #"
+                                    TransportMode.BUS -> "Bus #"
+                                    else -> "Flight #"
+                                }
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                when (uiState.transportMode) {
+                                    TransportMode.TRAIN -> "ICE 123"
+                                    TransportMode.BUS -> "FX 456"
+                                    else -> "SQ123"
+                                }
+                            )
+                        },
                         modifier = Modifier.weight(0.6f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -308,7 +358,7 @@ fun AddFlightScreen(
                     .height(56.dp),
                 enabled = uiState.isValid && !uiState.isSaving
             ) {
-                Text(if (uiState.isSaving) "Saving..." else "Save Flight")
+                Text(if (uiState.isSaving) "Saving..." else "Save $modeLabel")
             }
             
             Spacer(modifier = Modifier.height(16.dp))

@@ -97,6 +97,7 @@ import java.util.TimeZone
 @Composable
 fun JourneyDetailScreen(
     onNavigateBack: () -> Unit,
+    onOpenMap: (java.time.LocalDate, String?) -> Unit = { _, _ -> },
     viewModel: JourneyDetailViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -108,6 +109,7 @@ fun JourneyDetailScreen(
     var editingFlight by remember { mutableStateOf<FlightEntity?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
+    var previewPdfUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.wasDeleted) {
         if (state.wasDeleted) onNavigateBack()
@@ -191,6 +193,9 @@ fun JourneyDetailScreen(
                             onOpenPhoto = { photos, index ->
                                 fullscreenPhotos = photos
                                 fullscreenIndex = index
+                            },
+                            onOpenDay = { day ->
+                                onOpenMap(day.date, day.countryCode)
                             }
                         )
                     }
@@ -240,8 +245,12 @@ fun JourneyDetailScreen(
                             viewModel.setFlightTicketPhoto(flight.id, null)
                         },
                         onOpenTicketPhoto = { uri ->
-                            fullscreenPhotos = listOf(uri)
-                            fullscreenIndex = 0
+                            if (isPdfAttachment(uri)) {
+                                previewPdfUri = uri
+                            } else {
+                                fullscreenPhotos = listOf(uri)
+                                fullscreenIndex = 0
+                            }
                         }
                     )
                 }
@@ -255,6 +264,17 @@ fun JourneyDetailScreen(
             photos = photos,
             initialIndex = fullscreenIndex,
             onDismiss = { fullscreenPhotos = null }
+        )
+    }
+
+    previewPdfUri?.let { pdfUri ->
+        com.roamatlas.presentation.components.PdfPreviewDialog(
+            uriString = pdfUri,
+            onDismiss = { previewPdfUri = null },
+            onOpenExternal = {
+                openTicketAttachment(context, pdfUri)
+                previewPdfUri = null
+            }
         )
     }
 
@@ -465,7 +485,8 @@ private fun JourneyTimelineSection(
     trackedDayCount: Int,
     timelinePhotos: List<LocationRecord>,
     onImportPhotos: () -> Unit,
-    onOpenPhoto: (List<String>, Int) -> Unit
+    onOpenPhoto: (List<String>, Int) -> Unit,
+    onOpenDay: (JourneyDaySummary) -> Unit
 ) {
     val photoUris = timelinePhotos.mapNotNull {
         it.originalPhotoUri?.takeIf { uri -> uri.isNotBlank() }
@@ -487,6 +508,11 @@ private fun JourneyTimelineSection(
                     "in this journey’s date range",
                 style = MaterialTheme.typography.bodySmall
             )
+            Text(
+                "Tap a day to open it on the main Map.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
             days.take(12).forEach { day ->
                 Text(
                     buildString {
@@ -498,7 +524,11 @@ private fun JourneyTimelineSection(
                         append(" · ${day.pointCount} points")
                         if (day.photoCount > 0) append(" · ${day.photoCount} photos")
                     },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenDay(day) }
+                        .padding(vertical = 6.dp)
                 )
             }
             if (days.size > 12) {
@@ -733,9 +763,12 @@ private fun FlightLegCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    listOfNotNull(flight.airline, flight.flightNumber)
-                        .joinToString(" · ")
-                        .ifBlank { "Flight" },
+                    buildString {
+                        append(com.roamatlas.data.local.entity.TransportMode.label(flight.transportMode))
+                        val detail = listOfNotNull(flight.airline, flight.flightNumber)
+                            .joinToString(" · ")
+                        if (detail.isNotBlank()) append(" · ").append(detail)
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -780,12 +813,12 @@ private fun FlightLegCard(
             if (!ticketUri.isNullOrBlank()) {
                 if (isPdfAttachment(ticketUri)) {
                     OutlinedButton(
-                        onClick = { openTicketAttachment(context, ticketUri) },
+                        onClick = { onOpenTicketPhoto(ticketUri) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.PictureAsPdf, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text("Open PDF ticket")
+                        Text("Preview PDF ticket")
                     }
                 } else {
                     AsyncImage(

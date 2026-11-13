@@ -44,8 +44,25 @@ data class FlightEntity(
     val estimatedArrivalTimeMillis: Long? = null,
     val flightStatus: String? = null,
     val separateTicketFromPrevious: Boolean? = null,
-    val minimumConnectionMinutes: Int? = null
+    val minimumConnectionMinutes: Int? = null,
+    /** FLIGHT, TRAIN, or BUS — stations reuse airport code fields. */
+    val transportMode: String = TransportMode.FLIGHT
 )
+
+object TransportMode {
+    const val FLIGHT = "FLIGHT"
+    const val TRAIN = "TRAIN"
+    const val BUS = "BUS"
+
+    fun label(mode: String?): String = when (mode?.uppercase()) {
+        TRAIN -> "Train"
+        BUS -> "Bus"
+        else -> "Flight"
+    }
+
+    fun isFlight(mode: String?): Boolean =
+        mode.isNullOrBlank() || mode.equals(FLIGHT, ignoreCase = true)
+}
 
 @Entity(tableName = "trips")
 data class TripEntity(

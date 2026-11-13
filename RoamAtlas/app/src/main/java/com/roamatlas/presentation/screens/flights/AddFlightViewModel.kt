@@ -6,6 +6,7 @@ import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TransportMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 data class AddFlightUiState(
+    val transportMode: String = TransportMode.FLIGHT,
     // Departure
     val departureAirportCode: String = "",
     val departureAirportName: String = "",
@@ -58,10 +60,14 @@ data class AddFlightUiState(
     val error: String? = null
 ) {
     val isValid: Boolean
-        get() = departureAirportCode.length == 3 &&
-                arrivalAirportCode.length == 3 &&
-                departureDateMillis != null &&
-                arrivalDateMillis != null
+        get() {
+            val codeOk = if (TransportMode.isFlight(transportMode)) {
+                departureAirportCode.length == 3 && arrivalAirportCode.length == 3
+            } else {
+                departureAirportCode.length >= 2 && arrivalAirportCode.length >= 2
+            }
+            return codeOk && departureDateMillis != null && arrivalDateMillis != null
+        }
 }
 
 @HiltViewModel
@@ -75,6 +81,10 @@ class AddFlightViewModel @Inject constructor(
     
     private var selectedDepartureAirport: Airport? = null
     private var selectedArrivalAirport: Airport? = null
+
+    fun setTransportMode(mode: String) {
+        _uiState.update { it.copy(transportMode = mode) }
+    }
 
     fun searchDepartureAirport(query: String) {
         _uiState.update { it.copy(departureAirportSearch = query) }
@@ -290,11 +300,11 @@ class AddFlightViewModel @Inject constructor(
                 
                 val flight = FlightEntity(
                     id = 0, // Auto-generated
-                    departureAirportCode = state.departureAirportCode,
+                    departureAirportCode = state.departureAirportCode.uppercase(),
                     departureAirportName = state.departureAirportName.ifBlank { null },
                     departureCity = state.departureCity.ifBlank { null },
                     departureCountryCode = state.departureCountryCode.ifBlank { null },
-                    arrivalAirportCode = state.arrivalAirportCode,
+                    arrivalAirportCode = state.arrivalAirportCode.uppercase(),
                     arrivalAirportName = state.arrivalAirportName.ifBlank { null },
                     arrivalCity = state.arrivalCity.ifBlank { null },
                     arrivalCountryCode = state.arrivalCountryCode.ifBlank { null },
@@ -311,7 +321,8 @@ class AddFlightViewModel @Inject constructor(
                     photoUri = null,
                     source = "MANUAL",
                     createdAtMillis = System.currentTimeMillis(),
-                    updatedAtMillis = System.currentTimeMillis()
+                    updatedAtMillis = System.currentTimeMillis(),
+                    transportMode = state.transportMode
                 )
                 
                 flightDao.insert(flight)

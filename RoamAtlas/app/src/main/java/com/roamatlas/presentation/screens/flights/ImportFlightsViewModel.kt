@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.roamatlas.data.email.GmailFlightImporter
 import com.roamatlas.data.email.ParsedItinerary
+import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.entity.FlightEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,7 +34,8 @@ data class ImportFlightsUiState(
 @HiltViewModel
 class ImportFlightsViewModel @Inject constructor(
     private val gmailFlightImporter: GmailFlightImporter,
-    private val flightDao: FlightDao
+    private val flightDao: FlightDao,
+    private val journeyRepository: JourneyRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(ImportFlightsUiState())
@@ -285,12 +287,42 @@ class ImportFlightsViewModel @Inject constructor(
                     }
                 }
 
+                // Auto-create journeys from unassigned connected flights
+                // (prefer same booking reference; otherwise continuous route ≤48h).
+                var journeysCreated = 0
+                val unassigned = flightDao.getUnassignedFlights().first()
+                val suggested = journeyRepository.suggestConnectedGroups(unassigned)
+                suggested.forEach { group ->
+                    val sameBooking = group.mapNotNull { it.bookingReference?.takeIf(String::isNotBlank) }
+                        .distinctBy { it.lowercase() }
+                        .size <= 1 &&
+                        group.any { !it.bookingReference.isNullOrBlank() }
+                    runCatching {
+                        journeyRepository.createJourney(
+                            name = "",
+                            notes = if (sameBooking) {
+                                "Auto-created from Gmail booking"
+                            } else {
+                                "Auto-created from connected Gmail flights"
+                            },
+                            flights = group
+                        )
+                        journeysCreated++
+                    }
+                }
+
                 val resultParts = buildList {
                     if (matchedCount > 0) {
                         add("$matchedCount flight${if (matchedCount == 1) "" else "s"} matched your manual entry and ${if (matchedCount == 1) "was" else "were"} updated")
                     }
                     if (importedCount > 0) {
                         add("$importedCount new flight${if (importedCount == 1) "" else "s"} imported")
+                    }
+                    if (journeysCreated > 0) {
+                        add(
+                            "$journeysCreated journey${if (journeysCreated == 1) "" else "s"} " +
+                                "auto-created from connected flights"
+                        )
                     }
                     if (skippedCount > 0) {
                         add("$skippedCount skipped because the email had no travel date; add it manually")

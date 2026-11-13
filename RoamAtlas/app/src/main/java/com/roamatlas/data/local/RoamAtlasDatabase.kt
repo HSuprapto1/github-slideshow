@@ -21,7 +21,7 @@ import com.roamatlas.data.local.entity.UserSettingsEntity
         TripEntity::class,
         UserSettingsEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class RoamAtlasDatabase : RoomDatabase() {
