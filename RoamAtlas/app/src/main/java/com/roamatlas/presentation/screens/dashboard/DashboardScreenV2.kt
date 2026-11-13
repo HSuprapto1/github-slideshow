@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -51,20 +53,29 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.roamatlas.domain.model.CountryVisitStats
 import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.presentation.screens.journey.JourneyRouteRiskStrip
+import com.roamatlas.presentation.screens.photos.LocationPickerScreen
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.text.NumberFormat
@@ -83,6 +94,14 @@ fun DashboardScreenV2(
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    if (uiState.showLocationPicker) {
+        LocationPickerScreen(
+            onNavigateBack = viewModel::hideLocationPicker,
+            onLocationChosen = viewModel::resolvePendingWithMapLocation
+        )
+        return
+    }
     
     Scaffold(
         topBar = {
@@ -235,7 +254,7 @@ fun DashboardScreenV2(
         )
     }
 
-    if (uiState.showAddPhotoDialog) {
+    if (uiState.showAddPhotoDialog && !uiState.showLocationPicker) {
         AddPhotoToTimelineDialog(
             isImporting = uiState.photoImporting,
             lastResultMessage = uiState.photoImportMessage,
@@ -243,6 +262,38 @@ fun DashboardScreenV2(
             onImportGallery = viewModel::importGalleryPhotos,
             onImportCaptured = viewModel::importCapturedPhoto
         )
+    }
+
+    if (uiState.showNoGpsResolver && !uiState.showLocationPicker) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        ResolveNoGpsPhotoDialog(
+            remainingCount = uiState.pendingNoGpsUris.size,
+            isWorking = uiState.photoImporting,
+            onUseCurrentLocation = {
+                scope.launch {
+                    val capture = withContext(Dispatchers.IO) {
+                        readCurrentLocation(context)
+                    }
+                    if (capture == null) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Could not read current GPS. Try Pick on map instead.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        viewModel.resolvePendingWithCurrentLocation(capture)
+                    }
+                }
+            },
+            onPickOnMap = viewModel::openLocationPickerForPending,
+            onSkip = viewModel::skipCurrentNoGpsPhoto,
+            onDismiss = viewModel::hideAddPhotoDialog
+        )
+    }
+
+    if (uiState.showLocationPicker) {
+        // Full-screen picker hosted as a dialog-like overlay via separate route content below.
     }
 
     if (uiState.showAddTrackerDialog) {
@@ -499,41 +550,64 @@ private fun TravelFactsSection(
         .filter { it.lastVisit != null }
         .maxByOrNull { it.lastVisit!! }
 
+    var expanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            "Interesting facts",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (spanYears > 0) {
-                    FactLine("Your records span $spanYears calendar ${if (spanYears == 1) "year" else "years"}.")
-                }
-                if (homeCountryCode != null) {
-                    FactLine(
-                        "Beyond ${homeCountryName ?: homeCountryCode}, records appear in " +
-                            "$destinationsBeyondHome other ${if (destinationsBeyondHome == 1) "country" else "countries"}."
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Interesting facts",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Collapse" else "Expand"
                     )
                 }
-                abroadPercent?.let {
-                    FactLine(
-                        "$it% of days with home/abroad evidence are marked outside " +
-                            "${homeCountryName ?: homeCountryCode}."
+                if (!expanded) {
+                    Text(
+                        "Tap to show optional travel facts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                firstCountry?.let {
-                    FactLine(
-                        "First country record: ${it.countryName} on ${formatDashboardDate(it.firstVisit!!)}."
-                    )
-                }
-                latestCountry?.let {
-                    FactLine(
-                        "Latest country record: ${it.countryName} on ${formatDashboardDate(it.lastVisit!!)}."
-                    )
+                } else {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (spanYears > 0) {
+                            FactLine("Your records span $spanYears calendar ${if (spanYears == 1) "year" else "years"}.")
+                        }
+                        if (homeCountryCode != null) {
+                            FactLine(
+                                "Beyond ${homeCountryName ?: homeCountryCode}, records appear in " +
+                                    "$destinationsBeyondHome other ${if (destinationsBeyondHome == 1) "country" else "countries"}."
+                            )
+                        }
+                        abroadPercent?.let {
+                            FactLine(
+                                "$it% of days with home/abroad evidence are marked outside " +
+                                    "${homeCountryName ?: homeCountryCode}."
+                            )
+                        }
+                        firstCountry?.let {
+                            FactLine(
+                                "First country record: ${it.countryName} on ${formatDashboardDate(it.firstVisit!!)}."
+                            )
+                        }
+                        latestCountry?.let {
+                            FactLine(
+                                "Latest country record: ${it.countryName} on ${formatDashboardDate(it.lastVisit!!)}."
+                            )
+                        }
+                    }
                 }
             }
         }

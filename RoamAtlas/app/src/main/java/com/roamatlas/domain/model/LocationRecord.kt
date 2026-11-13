@@ -30,6 +30,7 @@ data class LocationRecord(
     val originalSourceId: String? = null,
     val notes: String? = null,
     val photoUri: String? = null,
+    val originalPhotoUri: String? = null,
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now()
 )

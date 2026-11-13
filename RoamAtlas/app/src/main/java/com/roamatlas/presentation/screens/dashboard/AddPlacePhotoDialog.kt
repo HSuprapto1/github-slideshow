@@ -290,7 +290,7 @@ fun AddPhotoToTimelineDialog(
 }
 
 @SuppressLint("MissingPermission")
-private suspend fun readCurrentLocation(context: android.content.Context): CapturedPhotoLocation? {
+internal suspend fun readCurrentLocation(context: android.content.Context): CapturedPhotoLocation? {
     return runCatching {
         val client = LocationServices.getFusedLocationProviderClient(context)
         val cancellation = CancellationTokenSource()
@@ -310,8 +310,56 @@ private suspend fun readCurrentLocation(context: android.content.Context): Captu
                 accuracyMeters = it.accuracy.takeIf { meters -> meters > 0f },
                 altitudeMeters = if (it.hasAltitude()) it.altitude else null,
                 timestampMillis = it.time.takeIf { time -> time > 0L }
-                    ?: System.currentTimeMillis()
+                    ?: System.currentTimeMillis(),
+                label = "Current location"
             )
         }
     }.getOrNull()
+}
+
+@Composable
+fun ResolveNoGpsPhotoDialog(
+    remainingCount: Int,
+    isWorking: Boolean,
+    onUseCurrentLocation: () -> Unit,
+    onPickOnMap: () -> Unit,
+    onSkip: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (!isWorking) onDismiss() },
+        title = { Text("Photo has no GPS") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "This photo has no readable location tag. Choose where it happened. " +
+                        "$remainingCount photo${if (remainingCount == 1) "" else "s"} left to place.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (isWorking) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Saving…")
+                    }
+                } else {
+                    Button(onClick = onUseCurrentLocation, modifier = Modifier.fillMaxWidth()) {
+                        Text("Use current location")
+                    }
+                    OutlinedButton(onClick = onPickOnMap, modifier = Modifier.fillMaxWidth()) {
+                        Text("Pick on map / search address")
+                    }
+                    TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
+                        Text("Skip this photo")
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isWorking) { Text("Close") }
+        }
+    )
 }

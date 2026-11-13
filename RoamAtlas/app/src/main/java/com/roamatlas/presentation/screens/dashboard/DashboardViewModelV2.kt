@@ -43,6 +43,10 @@ data class DashboardUiStateV2(
     val showAddPhotoDialog: Boolean = false,
     val photoImporting: Boolean = false,
     val photoImportMessage: String? = null,
+    val pendingNoGpsUris: List<Uri> = emptyList(),
+    val showNoGpsResolver: Boolean = false,
+    val showLocationPicker: Boolean = false,
+    val resolvingNoGpsUri: Uri? = null,
     val todayPointCount: Int = 0,
     val todayCities: List<String> = emptyList(),
     val editingTracker: DayTracker? = null,
@@ -274,7 +278,10 @@ class DashboardViewModelV2 @Inject constructor(
     fun hideAddPhotoDialog() {
         _uiState.value = _uiState.value.copy(
             showAddPhotoDialog = false,
-            photoImporting = false
+            photoImporting = false,
+            showNoGpsResolver = false,
+            showLocationPicker = false,
+            resolvingNoGpsUri = null
         )
     }
 
@@ -294,7 +301,10 @@ class DashboardViewModelV2 @Inject constructor(
             refreshTodaySummary()
             _uiState.value = _uiState.value.copy(
                 photoImporting = false,
-                photoImportMessage = result.summaryMessage()
+                photoImportMessage = result.summaryMessage(),
+                pendingNoGpsUris = result.pendingNoGpsUris,
+                showNoGpsResolver = result.pendingNoGpsUris.isNotEmpty(),
+                resolvingNoGpsUri = result.pendingNoGpsUris.firstOrNull()
             )
         }
     }
@@ -314,9 +324,88 @@ class DashboardViewModelV2 @Inject constructor(
             refreshTodaySummary()
             _uiState.value = _uiState.value.copy(
                 photoImporting = false,
-                photoImportMessage = result.summaryMessage()
+                photoImportMessage = result.summaryMessage(),
+                pendingNoGpsUris = result.pendingNoGpsUris,
+                showNoGpsResolver = result.pendingNoGpsUris.isNotEmpty(),
+                resolvingNoGpsUri = result.pendingNoGpsUris.firstOrNull()
             )
         }
+    }
+
+    fun resolvePendingWithCurrentLocation(location: CapturedPhotoLocation) {
+        val uri = _uiState.value.resolvingNoGpsUri ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(photoImporting = true)
+            val result = runCatching {
+                photoTimelineImporter.importWithChosenLocation(
+                    uri,
+                    location.copy(label = location.label ?: "Current location")
+                )
+            }.getOrElse {
+                _uiState.value = _uiState.value.copy(
+                    photoImporting = false,
+                    photoImportMessage = it.message ?: "Could not place photo."
+                )
+                return@launch
+            }
+            advanceNoGpsQueue(result.summaryMessage())
+        }
+    }
+
+    fun openLocationPickerForPending() {
+        if (_uiState.value.resolvingNoGpsUri == null) return
+        _uiState.value = _uiState.value.copy(
+            showLocationPicker = true,
+            showAddPhotoDialog = false,
+            showNoGpsResolver = false
+        )
+    }
+
+    fun hideLocationPicker() {
+        _uiState.value = _uiState.value.copy(
+            showLocationPicker = false,
+            showAddPhotoDialog = true,
+            showNoGpsResolver = _uiState.value.pendingNoGpsUris.isNotEmpty()
+        )
+    }
+
+    fun resolvePendingWithMapLocation(location: CapturedPhotoLocation) {
+        val uri = _uiState.value.resolvingNoGpsUri ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(photoImporting = true, showLocationPicker = false)
+            val result = runCatching {
+                photoTimelineImporter.importWithChosenLocation(uri, location)
+            }.getOrElse {
+                _uiState.value = _uiState.value.copy(
+                    photoImporting = false,
+                    showAddPhotoDialog = true,
+                    showNoGpsResolver = true,
+                    photoImportMessage = it.message ?: "Could not place photo."
+                )
+                return@launch
+            }
+            advanceNoGpsQueue(result.summaryMessage())
+        }
+    }
+
+    fun skipCurrentNoGpsPhoto() {
+        viewModelScope.launch {
+            advanceNoGpsQueue("Skipped one photo without choosing a location.")
+        }
+    }
+
+    private suspend fun advanceNoGpsQueue(message: String) {
+        val remaining = _uiState.value.pendingNoGpsUris.drop(1)
+        refreshTodaySummary()
+        _uiState.value = _uiState.value.copy(
+            photoImporting = false,
+            photoImportMessage = message,
+            pendingNoGpsUris = remaining,
+            resolvingNoGpsUri = remaining.firstOrNull(),
+            showNoGpsResolver = remaining.isNotEmpty(),
+            showAddPhotoDialog = true,
+            showLocationPicker = false
+        )
     }
 
     private suspend fun refreshTodaySummary() {

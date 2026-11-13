@@ -6,4 +6,10 @@
     <external-files-path
         name="place_photos"
         path="place_photos/" />
+    <files-path
+        name="photo_thumbs"
+        path="photo_thumbs/" />
+    <cache-path
+        name="shared_photos"
+        path="shared_photos/" />
 </paths>

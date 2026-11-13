@@ -28,6 +28,7 @@ fun LocationEntity.toDomain(): LocationRecord {
         originalSourceId = originalSourceId,
         notes = notes,
         photoUri = photoUri,
+        originalPhotoUri = originalPhotoUri,
         createdAt = Instant.ofEpochMilli(createdAtMillis),
         updatedAt = Instant.ofEpochMilli(updatedAtMillis)
     )
@@ -50,6 +51,7 @@ fun LocationRecord.toEntity(): LocationEntity {
         originalSourceId = originalSourceId,
         notes = notes,
         photoUri = photoUri,
+        originalPhotoUri = originalPhotoUri,
         createdAtMillis = createdAt.toEpochMilli(),
         updatedAtMillis = updatedAt.toEpochMilli()
     )

@@ -29,6 +29,7 @@ import com.roamatlas.presentation.screens.country.CountriesScreen
 import com.roamatlas.presentation.screens.city.CitiesScreen
 import com.roamatlas.presentation.screens.city.CityDetailScreen
 import com.roamatlas.presentation.screens.days.DayAuditScreen
+import com.roamatlas.presentation.screens.photos.PhotosScreen
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
 import com.roamatlas.presentation.screens.flights.AddFlightScreen
@@ -204,6 +205,9 @@ fun RoamAtlasApp(
                         },
                         onNavigateToGpsTracking = {
                             navController.navigate(Screen.GpsTracking.route)
+                        },
+                        onNavigateToStatistics = {
+                            navController.navigate(Screen.Statistics.route)
                         },
                         onNavigateToHomeCountry = {
                             navController.navigate(Screen.HomeCountry.route)

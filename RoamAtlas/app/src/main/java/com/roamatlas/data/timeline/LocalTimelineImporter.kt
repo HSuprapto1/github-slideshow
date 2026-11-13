@@ -328,6 +328,7 @@ class LocalTimelineImporter @Inject constructor(
             originalSourceId = originalSourceId,
             notes = notes,
             photoUri = null,
+            originalPhotoUri = null,
             createdAtMillis = now,
             updatedAtMillis = now
         )
@@ -402,6 +403,7 @@ class LocalTimelineImporter @Inject constructor(
             city = loc.optString("name", null) ?: place.city,
             confidence = "VERIFIED", originalSourceId = "pv_$ts",
             notes = loc.optString("address", null), photoUri = null,
+            originalPhotoUri = null,
             createdAtMillis = now, updatedAtMillis = now
         )
     }
@@ -422,6 +424,7 @@ class LocalTimelineImporter @Inject constructor(
                     countryCode = place.countryCode, countryName = place.countryName, city = place.city,
                     confidence = "UNCERTAIN", originalSourceId = "seg_$ts",
                     notes = null, photoUri = null,
+            originalPhotoUri = null,
                     createdAtMillis = now, updatedAtMillis = now
                 ))
             }
@@ -449,6 +452,7 @@ class LocalTimelineImporter @Inject constructor(
             speed = null, countryCode = place.countryCode, countryName = place.countryName, city = place.city,
             confidence = if (acc != null && acc < 50) "VERIFIED" else "UNCERTAIN",
             originalSourceId = "rec_$ts", notes = null, photoUri = null,
+            originalPhotoUri = null,
             createdAtMillis = now, updatedAtMillis = now
         )
     }
@@ -474,6 +478,7 @@ class LocalTimelineImporter @Inject constructor(
             city = obj.optString("name", null) ?: place.city,
             confidence = "UNCERTAIN", originalSourceId = "gen_$ts",
             notes = obj.optString("address", null), photoUri = null,
+            originalPhotoUri = null,
             createdAtMillis = now, updatedAtMillis = now
         )
     }

@@ -29,11 +29,9 @@ data class PhotoImportResult(
     val attachedToExisting: Int = 0,
     val skippedDuplicate: Int = 0,
     val skippedNoGps: Int = 0,
-    val failed: Int = 0
+    val failed: Int = 0,
+    val pendingNoGpsUris: List<Uri> = emptyList()
 ) {
-    val processed: Int
-        get() = added + attachedToExisting + skippedDuplicate + skippedNoGps + failed
-
     fun summaryMessage(): String {
         val parts = buildList {
             if (added > 0) add("added $added new timeline point${if (added == 1) "" else "s"}")
@@ -42,10 +40,7 @@ data class PhotoImportResult(
             }
             if (skippedDuplicate > 0) add("skipped $skippedDuplicate already imported")
             if (skippedNoGps > 0) {
-                add(
-                    "skipped $skippedNoGps with no readable GPS " +
-                        "(Gallery may show location, but RoamAtlas could not read it from the file)"
-                )
+                add("$skippedNoGps photo${if (skippedNoGps == 1) "" else "s"} need a location")
             }
             if (failed > 0) add("failed $failed")
         }
@@ -62,7 +57,8 @@ data class CapturedPhotoLocation(
     val longitude: Double,
     val accuracyMeters: Float? = null,
     val altitudeMeters: Double? = null,
-    val timestampMillis: Long = System.currentTimeMillis()
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val label: String? = null
 )
 
 private data class ResolvedPhotoLocation(
@@ -85,16 +81,20 @@ class PhotoTimelineImporter @Inject constructor(
         var skippedDuplicate = 0
         var skippedNoGps = 0
         var failed = 0
+        val pending = mutableListOf<Uri>()
         uris.forEach { uri ->
             when (val outcome = importOne(uri, fallbackLocation = null)) {
                 ImportOutcome.ADDED -> added++
                 ImportOutcome.ATTACHED -> attached++
                 ImportOutcome.DUPLICATE -> skippedDuplicate++
-                ImportOutcome.NO_GPS -> skippedNoGps++
+                ImportOutcome.NO_GPS -> {
+                    skippedNoGps++
+                    pending += uri
+                }
                 ImportOutcome.FAILED -> failed++
             }
         }
-        return PhotoImportResult(added, attached, skippedDuplicate, skippedNoGps, failed)
+        return PhotoImportResult(added, attached, skippedDuplicate, skippedNoGps, failed, pending)
     }
 
     suspend fun importCapturedPhoto(
@@ -105,8 +105,38 @@ class PhotoTimelineImporter @Inject constructor(
             ImportOutcome.ADDED -> PhotoImportResult(added = 1)
             ImportOutcome.ATTACHED -> PhotoImportResult(attachedToExisting = 1)
             ImportOutcome.DUPLICATE -> PhotoImportResult(skippedDuplicate = 1)
-            ImportOutcome.NO_GPS -> PhotoImportResult(skippedNoGps = 1)
+            ImportOutcome.NO_GPS -> PhotoImportResult(skippedNoGps = 1, pendingNoGpsUris = listOf(uri))
             ImportOutcome.FAILED -> PhotoImportResult(failed = 1)
+        }
+    }
+
+    suspend fun importWithChosenLocation(
+        uri: Uri,
+        location: CapturedPhotoLocation
+    ): PhotoImportResult = importCapturedPhoto(uri, location)
+
+    suspend fun deletePhotoPoint(
+        locationId: Long,
+        alsoDeleteFromGallery: Boolean
+    ): String {
+        val entity = locationDao.getLocationById(locationId)
+            ?: return "Photo point not found."
+        entity.photoUri?.let { deleteLocalFileUri(it) }
+        locationDao.deleteById(locationId)
+        if (!alsoDeleteFromGallery) {
+            return "Removed from RoamAtlas."
+        }
+        val original = entity.originalPhotoUri?.let(Uri::parse)
+        if (original == null) {
+            return "Removed from RoamAtlas. Original gallery file was not linked, so it was not deleted."
+        }
+        val deleted = runCatching {
+            context.contentResolver.delete(original, null, null) > 0
+        }.getOrDefault(false)
+        return if (deleted) {
+            "Removed from RoamAtlas and deleted from Gallery."
+        } else {
+            "Removed from RoamAtlas. Could not delete the Gallery original (permission or cloud photo)."
         }
     }
 
@@ -127,7 +157,7 @@ class PhotoTimelineImporter @Inject constructor(
                         longitude = it.longitude,
                         altitudeMeters = it.altitudeMeters,
                         timestampMillis = it.timestampMillis,
-                        source = "device_gps"
+                        source = it.label?.let { label -> "chosen:$label" } ?: "chosen_location"
                     )
                 }
             if (resolved == null) return ImportOutcome.NO_GPS
@@ -139,8 +169,8 @@ class PhotoTimelineImporter @Inject constructor(
                 ?: System.currentTimeMillis()
             val altitude = resolved.altitudeMeters ?: fallbackLocation?.altitudeMeters
             val accuracy = fallbackLocation?.accuracyMeters
-
             val thumbnailUri = createThumbnail(uri, sourceId) ?: return ImportOutcome.FAILED
+            val originalUri = uri.toString()
 
             val nearby = findNearbyPoint(latitude, longitude, timestampMillis)
             if (nearby != null) {
@@ -148,6 +178,7 @@ class PhotoTimelineImporter @Inject constructor(
                     locationDao.update(
                         nearby.copy(
                             photoUri = thumbnailUri,
+                            originalPhotoUri = nearby.originalPhotoUri ?: originalUri,
                             notes = mergeNotes(
                                 nearby.notes,
                                 "Photo thumbnail attached (${resolved.source})"
@@ -162,6 +193,13 @@ class PhotoTimelineImporter @Inject constructor(
 
             val place = geoResolver.resolve(latitude, longitude)
             val now = System.currentTimeMillis()
+            val note = buildString {
+                append("Imported from photo (${resolved.source})")
+                fallbackLocation?.label?.takeIf { it.isNotBlank() }?.let {
+                    append(" · ")
+                    append(it)
+                }
+            }
             val inserted = locationDao.insert(
                 LocationEntity(
                     latitude = latitude,
@@ -176,8 +214,9 @@ class PhotoTimelineImporter @Inject constructor(
                     city = place.city,
                     confidence = "VERIFIED",
                     originalSourceId = sourceId,
-                    notes = "Imported from photo (${resolved.source})",
+                    notes = note,
                     photoUri = thumbnailUri,
+                    originalPhotoUri = originalUri,
                     createdAtMillis = now,
                     updatedAtMillis = now
                 )
@@ -201,7 +240,6 @@ class PhotoTimelineImporter @Inject constructor(
                     source = "exif"
                 )
             }
-            // Manual GPS tag read as fallback for some OEM encodings.
             readManualGpsTags(exif)?.let { (lat, lon) ->
                 return ResolvedPhotoLocation(
                     latitude = lat,
@@ -212,21 +250,16 @@ class PhotoTimelineImporter @Inject constructor(
                 )
             }
         }
-
-        readMediaStoreLocation(uri)?.let { return it }
-        return null
+        return readMediaStoreLocation(uri)
     }
 
     private fun openExif(uri: Uri): ExifInterface? {
         val readableUri = uriWithOriginalLocation(uri)
-        // Prefer a seekable FileDescriptor — InputStream often misses GPS on picker URIs.
         runCatching {
             context.contentResolver.openFileDescriptor(readableUri, "r")?.use { pfd ->
                 return ExifInterface(pfd.fileDescriptor)
             }
-        }.onFailure { Log.w(TAG, "openFileDescriptor EXIF failed for $uri", it) }
-
-        // Copy to a temp file so ExifInterface can seek freely.
+        }
         runCatching {
             val temp = File(context.cacheDir, "exif_${System.currentTimeMillis()}.tmp")
             context.contentResolver.openInputStream(readableUri)?.use { input ->
@@ -237,8 +270,7 @@ class PhotoTimelineImporter @Inject constructor(
             } finally {
                 temp.delete()
             }
-        }.onFailure { Log.w(TAG, "temp-file EXIF failed for $uri", it) }
-
+        }
         return runCatching {
             context.contentResolver.openInputStream(readableUri)?.use { input ->
                 ExifInterface(input)
@@ -261,20 +293,18 @@ class PhotoTimelineImporter @Inject constructor(
         return if (isValidLatLon(latitude, longitude)) latitude to longitude else null
     }
 
-    private fun dmsToDecimal(dms: String, ref: String): Double? {
-        return runCatching {
-            val parts = dms.split(',').map { part ->
-                val ratio = part.trim().split('/')
-                val num = ratio[0].toDouble()
-                val den = ratio.getOrNull(1)?.toDouble()?.takeIf { it != 0.0 } ?: 1.0
-                num / den
-            }
-            if (parts.size < 3) return null
-            var value = parts[0] + parts[1] / 60.0 + parts[2] / 3600.0
-            if (ref.equals("S", true) || ref.equals("W", true)) value = -value
-            value
-        }.getOrNull()
-    }
+    private fun dmsToDecimal(dms: String, ref: String): Double? = runCatching {
+        val parts = dms.split(',').map { part ->
+            val ratio = part.trim().split('/')
+            val num = ratio[0].toDouble()
+            val den = ratio.getOrNull(1)?.toDouble()?.takeIf { it != 0.0 } ?: 1.0
+            num / den
+        }
+        if (parts.size < 3) return null
+        var value = parts[0] + parts[1] / 60.0 + parts[2] / 3600.0
+        if (ref.equals("S", true) || ref.equals("W", true)) value = -value
+        value
+    }.getOrNull()
 
     private fun readMediaStoreLocation(uri: Uri): ResolvedPhotoLocation? {
         val resolver = context.contentResolver
@@ -289,50 +319,42 @@ class PhotoTimelineImporter @Inject constructor(
             longitudeColumn
         )
 
-        fun query(target: Uri): ResolvedPhotoLocation? {
-            return runCatching {
-                resolver.query(target, projection, null, null, null)?.use { cursor ->
-                    if (!cursor.moveToFirst()) return@use null
-                    val latIndex = cursor.getColumnIndex(latitudeColumn)
-                    val lonIndex = cursor.getColumnIndex(longitudeColumn)
-                    if (latIndex < 0 || lonIndex < 0) return@use null
-                    if (cursor.isNull(latIndex) || cursor.isNull(lonIndex)) return@use null
-                    val latitude = cursor.getDouble(latIndex)
-                    val longitude = cursor.getDouble(lonIndex)
-                    if (!isValidLatLon(latitude, longitude)) return@use null
-                    val takenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
-                    val addedIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
-                    val taken = if (takenIndex >= 0 && !cursor.isNull(takenIndex)) {
-                        cursor.getLong(takenIndex).takeIf { it > 0L }
-                    } else {
-                        null
-                    }
-                    val added = if (addedIndex >= 0 && !cursor.isNull(addedIndex)) {
-                        cursor.getLong(addedIndex).takeIf { it > 0L }?.times(1000)
-                    } else {
-                        null
-                    }
-                    ResolvedPhotoLocation(
-                        latitude = latitude,
-                        longitude = longitude,
-                        timestampMillis = taken ?: added,
-                        source = "mediastore"
-                    )
-                }
-            }.getOrNull()
-        }
+        fun query(target: Uri): ResolvedPhotoLocation? = runCatching {
+            resolver.query(target, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val latIndex = cursor.getColumnIndex(latitudeColumn)
+                val lonIndex = cursor.getColumnIndex(longitudeColumn)
+                if (latIndex < 0 || lonIndex < 0) return@use null
+                if (cursor.isNull(latIndex) || cursor.isNull(lonIndex)) return@use null
+                val latitude = cursor.getDouble(latIndex)
+                val longitude = cursor.getDouble(lonIndex)
+                if (!isValidLatLon(latitude, longitude)) return@use null
+                val takenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                val addedIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+                val taken = if (takenIndex >= 0 && !cursor.isNull(takenIndex)) {
+                    cursor.getLong(takenIndex).takeIf { it > 0L }
+                } else null
+                val added = if (addedIndex >= 0 && !cursor.isNull(addedIndex)) {
+                    cursor.getLong(addedIndex).takeIf { it > 0L }?.times(1000)
+                } else null
+                ResolvedPhotoLocation(
+                    latitude = latitude,
+                    longitude = longitude,
+                    timestampMillis = taken ?: added,
+                    source = "mediastore"
+                )
+            }
+        }.getOrNull()
 
         query(originalUri)?.let { return it }
         if (originalUri != uri) query(uri)?.let { return it }
-
-        // Photo picker URIs are often content://media/picker/... — resolve via MediaStore id if present.
-        val mediaId = uri.lastPathSegment?.toLongOrNull()
-        if (mediaId != null) {
-            val imageUri = ContentUris.withAppendedId(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                mediaId
-            )
-            query(imageUri)?.let { return it }
+        uri.lastPathSegment?.toLongOrNull()?.let { mediaId ->
+            query(
+                ContentUris.withAppendedId(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    mediaId
+                )
+            )?.let { return it }
         }
         return null
     }
@@ -365,8 +387,10 @@ class PhotoTimelineImporter @Inject constructor(
             ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
             ?: return null
         return runCatching {
-            val local = LocalDateTime.parse(raw, EXIF_FORMAT)
-            local.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            LocalDateTime.parse(raw, EXIF_FORMAT)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
         }.getOrNull()
     }
 
@@ -388,44 +412,50 @@ class PhotoTimelineImporter @Inject constructor(
         return digest.digest().joinToString("") { "%02x".format(it) }.take(24)
     }
 
-    private fun createThumbnail(uri: Uri, sourceId: String): String? {
-        return runCatching {
-            val bitmap = decodeBitmap(uri) ?: return null
-            val scaled = scaleBitmap(bitmap, 512)
-            val dir = File(context.filesDir, "photo_thumbs").apply { mkdirs() }
-            val file = File(dir, "$sourceId.jpg")
-            FileOutputStream(file).use { out ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, 82, out)
-            }
-            if (scaled !== bitmap) scaled.recycle()
-            if (!bitmap.isRecycled) bitmap.recycle()
-            Uri.fromFile(file).toString()
-        }.getOrNull()
-    }
+    private fun createThumbnail(uri: Uri, sourceId: String): String? = runCatching {
+        val bitmap = decodeBitmap(uri) ?: return null
+        val scaled = scaleBitmap(bitmap, 512)
+        val dir = File(context.filesDir, "photo_thumbs").apply { mkdirs() }
+        val file = File(dir, "$sourceId.jpg")
+        FileOutputStream(file).use { out ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, 82, out)
+        }
+        if (scaled !== bitmap) scaled.recycle()
+        if (!bitmap.isRecycled) bitmap.recycle()
+        Uri.fromFile(file).toString()
+    }.getOrNull()
 
-    private fun decodeBitmap(uri: Uri): Bitmap? {
-        return runCatching {
-            if (Build.VERSION.SDK_INT >= 28) {
-                val source = ImageDecoder.createSource(context.contentResolver, uri)
-                ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                    decoder.setTargetSampleSize(2)
-                    decoder.isMutableRequired = false
-                }
-            } else {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    BitmapFactory.decodeStream(input)
-                }
+    private fun decodeBitmap(uri: Uri): Bitmap? = runCatching {
+        if (Build.VERSION.SDK_INT >= 28) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.setTargetSampleSize(2)
+                decoder.isMutableRequired = false
             }
-        }.getOrNull()
-    }
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        }
+    }.getOrNull()
 
     private fun scaleBitmap(bitmap: Bitmap, maxSide: Int): Bitmap {
         val largest = maxOf(bitmap.width, bitmap.height)
         if (largest <= maxSide) return bitmap
         val scale = maxSide.toFloat() / largest
-        val width = (bitmap.width * scale).toInt().coerceAtLeast(1)
-        val height = (bitmap.height * scale).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(bitmap, width, height, true)
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt().coerceAtLeast(1),
+            (bitmap.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    }
+
+    private fun deleteLocalFileUri(uriString: String) {
+        runCatching {
+            val uri = Uri.parse(uriString)
+            if (uri.scheme == "file") {
+                uri.path?.let { File(it).delete() }
+            }
+        }
     }
 
     private fun mergeNotes(existing: String?, addition: String): String {
@@ -435,7 +465,6 @@ class PhotoTimelineImporter @Inject constructor(
 
     companion object {
         private const val TAG = "PhotoTimelineImporter"
-        private val EXIF_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss")
+        private val EXIF_FORMAT = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss")
     }
 }

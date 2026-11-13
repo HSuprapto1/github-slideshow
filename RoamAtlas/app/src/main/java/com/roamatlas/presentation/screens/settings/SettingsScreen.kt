@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -74,6 +75,7 @@ private enum class SettingsInformation {
 fun SettingsScreen(
     onNavigateToImport: () -> Unit = {},
     onNavigateToGpsTracking: () -> Unit = {},
+    onNavigateToStatistics: () -> Unit = {},
     onNavigateToHomeCountry: () -> Unit = {},
     onNavigateToImportFlights: () -> Unit = {},
     onNavigateToJourneys: () -> Unit = {},
@@ -163,6 +165,13 @@ fun SettingsScreen(
             
             item {
                 SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.QueryStats,
+                        title = "Statistics",
+                        subtitle = "Open the travel statistics screen",
+                        onClick = onNavigateToStatistics
+                    )
+                    HorizontalDivider()
                     SettingsItem(
                         icon = Icons.Default.Home,
                         title = "Home Country",
@@ -338,8 +347,9 @@ fun SettingsScreen(
             SettingsInformation.HELP ->
                 "If a number looks wrong, open Days to inspect the location evidence and correct " +
                     "individual dates. Tap a country or city to inspect its recorded dates and map.\n\n" +
-                    "To add photos to the timeline: Dashboard + → Photo to timeline → Load or Take. " +
-                    "Photos without GPS are skipped. Today’s point count is on the Dashboard Today card.\n\n" +
+                    "To add photos: Dashboard + → Photo to timeline, or open the Photos tab. " +
+                    "Photos without GPS can use current location or a map/address pick. " +
+                    "Today’s point count is on the Dashboard Today card.\n\n" +
                     "To label a place name (for example UTAN → Home): Dashboard → Cities → open the place.\n\n" +
                     "For Gmail error code 10, the app’s Google connection is not configured for this " +
                     "signed APK. This is an app setup problem, not a problem with your Gmail password."
