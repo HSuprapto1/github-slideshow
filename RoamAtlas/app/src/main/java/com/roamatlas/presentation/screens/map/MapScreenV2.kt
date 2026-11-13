@@ -86,13 +86,21 @@ fun MapScreenV2(
     initialDate: LocalDate? = null,
     initialCountryCode: String? = null,
     initialCity: String? = null,
+    initialLocationId: Long? = null,
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
 
-    LaunchedEffect(initialDate, initialCountryCode, initialCity) {
-        initialDate?.let { viewModel.showLocalDate(it, initialCountryCode, initialCity) }
+    LaunchedEffect(initialLocationId, initialDate, initialCountryCode, initialCity) {
+        when {
+            initialLocationId != null -> viewModel.focusLocation(initialLocationId)
+            initialDate != null -> viewModel.showLocalDate(
+                initialDate,
+                initialCountryCode,
+                initialCity
+            )
+        }
     }
     
     val cameraPositionState = rememberCameraPositionState {
@@ -199,9 +207,11 @@ fun MapScreenV2(
                         uiState.locations
                     }
 
-                    if (displayLocations.size >= 2) {
+                    // Draw the day track only for GPS/timeline points — not between photo pins.
+                    val trackPoints = displayLocations.filter { it.photoUri.isNullOrBlank() }
+                    if (trackPoints.size >= 2) {
                         Polyline(
-                            points = displayLocations.map {
+                            points = trackPoints.map {
                                 LatLng(it.latitude, it.longitude)
                             },
                             color = Color(0xFF1565C0),
@@ -210,30 +220,9 @@ fun MapScreenV2(
                     }
                     
                     displayLocations.forEach { location ->
-                        val markerColor = when (location.source) {
-                            LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
-                            LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
-                            LocationSource.MANUAL_ENTRY -> BitmapDescriptorFactory.HUE_ORANGE
-                        }
-                        
-                        Marker(
-                            state = MarkerState(position = LatLng(location.latitude, location.longitude)),
-                            title = buildString {
-                                if (!location.photoUri.isNullOrBlank()) append("Photo · ")
-                                append(location.city ?: formatTimestamp(location.timestamp))
-                            },
-                            snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
-                            icon = BitmapDescriptorFactory.defaultMarker(
-                                if (!location.photoUri.isNullOrBlank()) {
-                                    BitmapDescriptorFactory.HUE_VIOLET
-                                } else {
-                                    markerColor
-                                }
-                            ),
-                            onClick = {
-                                viewModel.selectLocation(location)
-                                true
-                            }
+                        LocationMapMarker(
+                            location = location,
+                            onClick = { viewModel.selectLocation(location) }
                         )
                     }
                 }
@@ -443,6 +432,38 @@ private fun FilterBar(
             }
         }
     }
+}
+
+@Composable
+private fun LocationMapMarker(
+    location: LocationRecord,
+    onClick: () -> Unit
+) {
+    val hasPhoto = !location.photoUri.isNullOrBlank()
+    val markerColor = when (location.source) {
+        LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
+        LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
+        LocationSource.MANUAL_ENTRY -> BitmapDescriptorFactory.HUE_ORANGE
+    }
+    val markerIcon = if (hasPhoto) {
+        rememberPhotoMarkerIcon(location.photoUri)
+    } else {
+        BitmapDescriptorFactory.defaultMarker(markerColor)
+    }
+
+    Marker(
+        state = MarkerState(position = LatLng(location.latitude, location.longitude)),
+        title = buildString {
+            if (hasPhoto) append("Photo · ")
+            append(location.city ?: formatTimestamp(location.timestamp))
+        },
+        snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
+        icon = markerIcon,
+        onClick = {
+            onClick()
+            true
+        }
+    )
 }
 
 @Composable

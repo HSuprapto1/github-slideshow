@@ -178,6 +178,10 @@ fun RoamAtlasApp(
                         initialCity = city
                     )
                 }
+                composable(Screen.Map.PHOTO_ROUTE) { entry ->
+                    val locationId = entry.arguments?.getString("locationId")?.toLongOrNull()
+                    MapScreenV2(initialLocationId = locationId)
+                }
                 composable(Screen.Days.route) {
                     DayAuditScreen(
                         onOpenMap = { date ->
@@ -187,8 +191,8 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.Photos.route) {
                     PhotosScreen(
-                        onOpenMap = { date ->
-                            navController.navigate(Screen.Map.forDate(date.toString()))
+                        onOpenMap = { photo ->
+                            navController.navigate(Screen.Map.forPhoto(photo.id))
                         }
                     )
                 }

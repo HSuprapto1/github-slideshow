@@ -2,7 +2,8 @@ package com.roamatlas.presentation.screens.photos
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,15 +53,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.roamatlas.domain.model.LocationRecord
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotosScreen(
-    onOpenMap: (LocalDate) -> Unit,
+    onOpenMap: (LocationRecord) -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -92,13 +92,7 @@ fun PhotosScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = "Share")
                         }
-                        IconButton(
-                            onClick = {
-                                onOpenMap(
-                                    it.timestamp.atZone(ZoneId.systemDefault()).toLocalDate()
-                                )
-                            }
-                        ) {
+                        IconButton(onClick = { onOpenMap(it) }) {
                             Icon(Icons.Default.Map, contentDescription = "Show on map")
                         }
                         IconButton(onClick = { confirmDelete = true }) {
@@ -121,13 +115,7 @@ fun PhotosScreen(
                     photo = state.selected!!,
                     message = state.message,
                     modifier = Modifier.padding(padding),
-                    onShowMap = {
-                        onOpenMap(
-                            state.selected!!.timestamp
-                                .atZone(ZoneId.systemDefault())
-                                .toLocalDate()
-                        )
-                    },
+                    onShowMap = { onOpenMap(state.selected!!) },
                     onShare = {
                         viewModel.shareSelected()?.let { intent ->
                             context.startActivity(Intent.createChooser(intent, "Share photo"))
@@ -146,6 +134,12 @@ fun PhotosScreen(
                         "${state.photos.size} photo point${if (state.photos.size == 1) "" else "s"}",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Tap a photo to open its map pin. Long-press for share or delete.",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (state.photos.isEmpty()) {
                         Box(
@@ -172,7 +166,10 @@ fun PhotosScreen(
                                     modifier = Modifier
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .clickable { viewModel.select(photo) }
+                                        .combinedClickable(
+                                            onClick = { onOpenMap(photo) },
+                                            onLongClick = { viewModel.select(photo) }
+                                        )
                                 )
                             }
                         }

@@ -193,6 +193,57 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Open the map on one photo/timeline point: zoom to it, select it, and show
+     * photo pins for that day (hide GPS/timeline tracks so the day route does not dominate).
+     */
+    fun focusLocation(locationId: Long) {
+        locationsJob?.cancel()
+        locationsJob = viewModelScope.launch {
+            val focused = locationRepository.getLocationById(locationId)
+            if (focused == null) {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+                return@launch
+            }
+            val date = focused.timestamp.atZone(ZoneId.systemDefault()).toLocalDate()
+            _uiState.value = _uiState.value.copy(
+                filterStartDate = date,
+                filterEndDate = date,
+                filterCountryCode = null,
+                showGps = false,
+                showTimeline = false,
+                showPhoto = true,
+                selectedLocation = focused,
+                mapCenterLat = focused.latitude,
+                mapCenterLng = focused.longitude,
+                mapZoom = PHOTO_FOCUS_ZOOM,
+                isLoading = true
+            )
+            locationRepository.getLocationsForLocalDate(
+                localDate = date,
+                countryCode = null,
+                city = null,
+                limit = MAX_MAP_POINTS
+            ).collect { locations ->
+                val photos = locations.filter { !it.photoUri.isNullOrBlank() }
+                val display = buildList {
+                    if (photos.none { it.id == focused.id }) add(focused)
+                    addAll(photos)
+                }.distinctBy { it.id }
+                val selected = display.find { it.id == focused.id } ?: focused
+                _uiState.value = _uiState.value.copy(
+                    locations = display,
+                    selectedLocation = selected,
+                    totalLocations = display.size,
+                    mapCenterLat = selected.latitude,
+                    mapCenterLng = selected.longitude,
+                    mapZoom = PHOTO_FOCUS_ZOOM,
+                    isLoading = false
+                )
+            }
+        }
+    }
+
     fun setCountryFilter(countryCode: String?) {
         _uiState.value = _uiState.value.copy(filterCountryCode = countryCode)
         loadLocations()
@@ -266,5 +317,6 @@ class MapViewModel @Inject constructor(
 
     companion object {
         private const val MAX_MAP_POINTS = 5_000
+        private const val PHOTO_FOCUS_ZOOM = 16f
     }
 }
