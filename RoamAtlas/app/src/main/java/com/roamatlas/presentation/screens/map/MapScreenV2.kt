@@ -286,9 +286,9 @@ fun MapScreenV2(
                         galleryStyle = !location.photoUri.isNullOrBlank(),
                         onOpenFullPhoto = { uri -> fullscreenPhotoUri = uri },
                         onClose = {
-                            if (initialLocationId == null) {
-                                viewModel.selectLocation(null)
-                            }
+                            // Dismiss the photo sheet so the map/pin is visible.
+                            viewModel.selectLocation(null)
+                            fullscreenPhotoUri = null
                         }
                     )
                 }
@@ -691,8 +691,13 @@ private fun FullscreenPhotoViewer(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(onClick = onDismiss)
     ) {
+        // Background tap closes; keep this behind the close button so × always works.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
         AsyncImage(
             model = Uri.parse(photoUri),
             contentDescription = "Full photo",
@@ -701,6 +706,7 @@ private fun FullscreenPhotoViewer(
                 .fillMaxSize()
                 .padding(8.dp)
                 .align(Alignment.Center)
+                .clickable(onClick = onDismiss)
         )
         IconButton(
             onClick = onDismiss,
