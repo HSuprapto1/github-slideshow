@@ -248,7 +248,17 @@ fun MapScreenV2(
                 FilterBar(
                     countryCodes = uiState.countryCodes,
                     selectedCountry = uiState.filterCountryCode,
+                    showGps = uiState.showGps,
+                    showTimeline = uiState.showTimeline,
+                    showPhoto = uiState.showPhoto,
                     onCountrySelected = { viewModel.setCountryFilter(it) },
+                    onSourceFilterChange = { gps, timeline, photo ->
+                        viewModel.setSourceFilters(
+                            showGps = gps,
+                            showTimeline = timeline,
+                            showPhoto = photo
+                        )
+                    },
                     onClearFilters = { viewModel.clearFilters() }
                 )
             }
@@ -344,7 +354,11 @@ private fun EmptyMapView() {
 private fun FilterBar(
     countryCodes: List<String>,
     selectedCountry: String?,
+    showGps: Boolean,
+    showTimeline: Boolean,
+    showPhoto: Boolean,
     onCountrySelected: (String?) -> Unit,
+    onSourceFilterChange: (Boolean, Boolean, Boolean) -> Unit,
     onClearFilters: () -> Unit
 ) {
     Surface(
@@ -353,7 +367,8 @@ private fun FilterBar(
         shadowElevation = 4.dp
     ) {
         Column(
-            modifier = Modifier.padding(12.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -361,25 +376,59 @@ private fun FilterBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Filter by Country",
+                    text = "Map filters",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
-                if (selectedCountry != null) {
-                    Text(
-                        text = "Clear",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onClearFilters() }
+                Text(
+                    text = "Clear",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onClearFilters() }
+                )
+            }
+
+            Text(
+                text = "Source",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = showTimeline,
+                        onClick = {
+                            onSourceFilterChange(showGps, !showTimeline, showPhoto)
+                        },
+                        label = { Text("History") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = showGps,
+                        onClick = {
+                            onSourceFilterChange(!showGps, showTimeline, showPhoto)
+                        },
+                        label = { Text("GPS") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = showPhoto,
+                        onClick = {
+                            onSourceFilterChange(showGps, showTimeline, !showPhoto)
+                        },
+                        label = { Text("Photo") }
                     )
                 }
             }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+
+            Text(
+                text = "Country",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(countryCodes) { code ->
                     FilterChip(
                         selected = code == selectedCountry,
@@ -535,8 +584,8 @@ private fun MapLegend(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             LegendItem(color = Color(0xFF4285F4), label = "GPS")
-            LegendItem(color = Color(0xFF34A853), label = "Timeline")
-            LegendItem(color = Color(0xFFFBBC05), label = "Manual")
+            LegendItem(color = Color(0xFF34A853), label = "History")
+            LegendItem(color = Color(0xFF9C27B0), label = "Photo")
         }
     }
 }

@@ -73,6 +73,15 @@ class LocationRepositoryImpl @Inject constructor(
     ): Flow<List<LocationRecord>> =
         locationDao.getLocationsForLocalDate(localDate.toString(), countryCode, city, limit)
             .map { entities -> entities.map { it.toDomain() } }
+
+    override fun getLocationsWithPhotos(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?,
+        limit: Int
+    ): Flow<List<LocationRecord>> =
+        locationDao.getLocationsWithPhotos(startMillis, endMillis, countryCode, limit)
+            .map { entities -> entities.map { it.toDomain() } }
     
     override suspend fun getLocationById(id: Long): LocationRecord? {
         return locationDao.getLocationById(id)?.toDomain()

@@ -75,6 +75,12 @@ interface LocationRepository {
         city: String? = null,
         limit: Int = 5_000
     ): Flow<List<LocationRecord>>
+    fun getLocationsWithPhotos(
+        startMillis: Long? = null,
+        endMillis: Long? = null,
+        countryCode: String? = null,
+        limit: Int = 500
+    ): Flow<List<LocationRecord>>
     
     suspend fun getLocationById(id: Long): LocationRecord?
     suspend fun countForLocalDate(localDate: LocalDate): Int

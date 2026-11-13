@@ -61,6 +61,22 @@ interface LocationDao {
         ) = :localDate
     """)
     suspend fun countForLocalDate(localDate: String): Int
+
+    @Query("""
+        SELECT * FROM locations
+        WHERE photoUri IS NOT NULL AND photoUri != ''
+          AND (:startMillis IS NULL OR timestampMillis >= :startMillis)
+          AND (:endMillis IS NULL OR timestampMillis < :endMillis)
+          AND (:countryCode IS NULL OR countryCode = :countryCode)
+        ORDER BY timestampMillis DESC
+        LIMIT :limit
+    """)
+    fun getLocationsWithPhotos(
+        startMillis: Long?,
+        endMillis: Long?,
+        countryCode: String?,
+        limit: Int
+    ): Flow<List<LocationEntity>>
     
     @Query("SELECT * FROM locations WHERE timestampMillis BETWEEN :startMillis AND :endMillis ORDER BY timestampMillis ASC")
     fun getLocationsBetween(startMillis: Long, endMillis: Long): Flow<List<LocationEntity>>
