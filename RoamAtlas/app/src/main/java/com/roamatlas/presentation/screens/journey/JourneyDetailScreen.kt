@@ -1,6 +1,10 @@
 package com.roamatlas.presentation.screens.journey
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -16,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +64,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.google.android.gms.maps.model.CameraPosition
@@ -72,9 +81,14 @@ import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.presentation.components.PhotoAttachmentSection
 import com.roamatlas.presentation.components.PhotoFullScreenViewer
+import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
+import java.io.File
 import java.text.SimpleDateFormat
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -167,7 +181,29 @@ fun JourneyDetailScreen(
                         }
                     )
                 }
-                item { JourneyRouteMap(value, state.airports) }
+                if (state.journeyDays.isNotEmpty() || state.timelinePhotos.isNotEmpty()) {
+                    item {
+                        JourneyTimelineSection(
+                            days = state.journeyDays,
+                            trackedDayCount = state.trackedDayCount,
+                            timelinePhotos = state.timelinePhotos,
+                            onImportPhotos = viewModel::importTimelinePhotosToAlbum,
+                            onOpenPhoto = { photos, index ->
+                                fullscreenPhotos = photos
+                                fullscreenIndex = index
+                            }
+                        )
+                    }
+                }
+                item {
+                    JourneyRouteMap(
+                        journey = value,
+                        airports = state.airports,
+                        gpsTrack = state.gpsTrack,
+                        showGpsTrack = state.showGpsTrack,
+                        onToggleGpsTrack = viewModel::setShowGpsTrack
+                    )
+                }
                 if (value.connections.isNotEmpty()) {
                     item {
                         Text(
@@ -424,34 +460,131 @@ private fun JourneyPhotosSection(
 }
 
 @Composable
+private fun JourneyTimelineSection(
+    days: List<JourneyDaySummary>,
+    trackedDayCount: Int,
+    timelinePhotos: List<LocationRecord>,
+    onImportPhotos: () -> Unit,
+    onOpenPhoto: (List<String>, Int) -> Unit
+) {
+    val photoUris = timelinePhotos.mapNotNull {
+        it.originalPhotoUri?.takeIf { uri -> uri.isNotBlank() }
+            ?: it.photoUri?.takeIf { uri -> uri.isNotBlank() }
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Days on this trip",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "$trackedDayCount GPS day${if (trackedDayCount == 1) "" else "s"} · " +
+                    "${timelinePhotos.size} timeline photo${if (timelinePhotos.size == 1) "" else "s"} " +
+                    "in this journey’s date range",
+                style = MaterialTheme.typography.bodySmall
+            )
+            days.take(12).forEach { day ->
+                Text(
+                    buildString {
+                        append(
+                            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(day.date)
+                        )
+                        day.countryName?.let { append(" · ").append(it) }
+                            ?: day.countryCode?.let { append(" · ").append(it) }
+                        append(" · ${day.pointCount} points")
+                        if (day.photoCount > 0) append(" · ${day.photoCount} photos")
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            if (days.size > 12) {
+                Text("+${days.size - 12} more days", style = MaterialTheme.typography.labelMedium)
+            }
+            if (photoUris.isNotEmpty()) {
+                Text("Timeline photos", fontWeight = FontWeight.SemiBold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(photoUris.size) { index ->
+                        AsyncImage(
+                            model = Uri.parse(photoUris[index]),
+                            contentDescription = "Timeline photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpenPhoto(photoUris, index) }
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = onImportPhotos,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add timeline photos to trip album")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun JourneyRouteMap(
     journey: JourneyWithFlights,
-    airports: Map<String, Airport>
+    airports: Map<String, Airport>,
+    gpsTrack: List<LocationRecord>,
+    showGpsTrack: Boolean,
+    onToggleGpsTrack: (Boolean) -> Unit
 ) {
-    val points = journey.orderedFlights.flatMap { flight ->
+    val airportPoints = journey.orderedFlights.flatMap { flight ->
         listOfNotNull(
             airports[flight.departureAirportCode]?.let { LatLng(it.latitude, it.longitude) },
             airports[flight.arrivalAirportCode]?.let { LatLng(it.latitude, it.longitude) }
         )
     }.distinct()
-    if (points.isEmpty()) {
+    val gpsPoints = gpsTrack.map { LatLng(it.latitude, it.longitude) }
+    val focus = gpsPoints.firstOrNull() ?: airportPoints.firstOrNull()
+    if (focus == null) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Text(
-                "Route map unavailable because airport coordinates are missing.",
+                "Route map unavailable because airport coordinates and GPS points are missing.",
                 modifier = Modifier.padding(16.dp)
             )
         }
         return
     }
     val cameraState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(points.first(), 2.5f)
+        position = CameraPosition.fromLatLngZoom(
+            focus,
+            if (gpsPoints.isNotEmpty()) 5f else 2.5f
+        )
     }
     Column {
         Text("Journey route", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            "Lines show estimated great-circle routes, not the aircraft’s actual track.",
+            "Blue = airport flight legs. Teal = GPS path during this journey (when available).",
             style = MaterialTheme.typography.bodySmall
         )
+        if (gpsPoints.isNotEmpty()) {
+            FilterChip(
+                selected = showGpsTrack,
+                onClick = { onToggleGpsTrack(!showGpsTrack) },
+                label = {
+                    Text(
+                        if (showGpsTrack) "GPS path on (${gpsPoints.size} pts)"
+                        else "GPS path off"
+                    )
+                }
+            )
+        } else {
+            Text(
+                "No GPS points found for this journey’s dates yet.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         GoogleMap(
             modifier = Modifier.fillMaxWidth().height(280.dp),
             cameraPositionState = cameraState
@@ -482,6 +615,13 @@ private fun JourneyRouteMap(
                         geodesic = true
                     )
                 }
+            }
+            if (showGpsTrack && gpsPoints.size >= 2) {
+                Polyline(
+                    points = gpsPoints,
+                    color = Color(0xFF00897B),
+                    width = 6f
+                )
             }
         }
     }
@@ -544,11 +684,45 @@ private fun FlightLegCard(
     onClearTicketPhoto: () -> Unit,
     onOpenTicketPhoto: (String) -> Unit
 ) {
-    val ticketLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+    val context = LocalContext.current
+    var showAttachDialog by remember { mutableStateOf(false) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let(onSetTicketPhoto)
     }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { saved ->
+        val uri = pendingCameraUri
+        if (saved && uri != null) onSetTicketPhoto(uri)
+        else if (uri != null) runCatching { context.contentResolver.delete(uri, null, null) }
+        pendingCameraUri = null
+    }
+    fun launchCamera() {
+        val uri = createPlaceCameraPhotoUri(context) ?: run {
+            Toast.makeText(context, "Could not open camera", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchCamera()
+        else Toast.makeText(context, "Camera permission needed", Toast.LENGTH_SHORT).show()
+    }
+    fun startCamera() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -604,18 +778,29 @@ private fun FlightLegCard(
             Text("Ticket / boarding pass", fontWeight = FontWeight.SemiBold)
             val ticketUri = flight.photoUri
             if (!ticketUri.isNullOrBlank()) {
-                AsyncImage(
-                    model = Uri.parse(ticketUri),
-                    contentDescription = "Ticket photo",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onOpenTicketPhoto(ticketUri) }
-                )
+                if (isPdfAttachment(ticketUri)) {
+                    OutlinedButton(
+                        onClick = { openTicketAttachment(context, ticketUri) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("Open PDF ticket")
+                    }
+                } else {
+                    AsyncImage(
+                        model = Uri.parse(ticketUri),
+                        contentDescription = "Ticket photo",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpenTicketPhoto(ticketUri) }
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { ticketLauncher.launch("image/*") }) {
+                    OutlinedButton(onClick = { showAttachDialog = true }) {
                         Text("Replace")
                     }
                     TextButton(onClick = onClearTicketPhoto) {
@@ -624,13 +809,71 @@ private fun FlightLegCard(
                 }
             } else {
                 OutlinedButton(
-                    onClick = { ticketLauncher.launch("image/*") },
+                    onClick = { showAttachDialog = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Add ticket or boarding pass photo")
+                    Text("Add ticket photo or PDF")
                 }
             }
         }
+    }
+
+    if (showAttachDialog) {
+        AlertDialog(
+            onDismissRequest = { showAttachDialog = false },
+            title = { Text("Attach ticket") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showAttachDialog = false
+                            documentLauncher.launch(arrayOf("image/*", "application/pdf"))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Gallery / Files (photo or PDF)") }
+                    TextButton(
+                        onClick = {
+                            showAttachDialog = false
+                            startCamera()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Camera") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAttachDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+private fun isPdfAttachment(uriString: String): Boolean {
+    val lower = uriString.lowercase(Locale.getDefault())
+    return lower.endsWith(".pdf") || lower.contains(".pdf")
+}
+
+private fun openTicketAttachment(context: android.content.Context, uriString: String) {
+    runCatching {
+        val parsed = Uri.parse(uriString)
+        val shareable = when (parsed.scheme) {
+            "file" -> {
+                val file = File(parsed.path ?: return)
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+            }
+            else -> parsed
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(shareable, "application/pdf")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Open ticket PDF"))
+    }.onFailure {
+        Toast.makeText(context, "Could not open PDF", Toast.LENGTH_SHORT).show()
     }
 }
 

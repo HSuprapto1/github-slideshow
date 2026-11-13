@@ -22,7 +22,11 @@ data class JourneysUiState(
     val journeys: List<JourneyWithFlights> = emptyList(),
     val upcomingJourneys: List<JourneyWithFlights> = emptyList(),
     val pastJourneys: List<JourneyWithFlights> = emptyList(),
+    val visibleJourneys: List<JourneyWithFlights> = emptyList(),
+    val destinationOptions: List<String> = emptyList(),
     val selectedTab: JourneyListTab = JourneyListTab.UPCOMING,
+    val searchQuery: String = "",
+    val destinationFilter: String? = null,
     val unassignedFlights: List<FlightEntity> = emptyList(),
     val suggestedGroups: List<List<FlightEntity>> = emptyList(),
     val showCreateDialog: Boolean = false,
@@ -57,21 +61,74 @@ class JourneysViewModel @Inject constructor(
                     past.isNotEmpty() -> JourneyListTab.PAST
                     else -> _uiState.value.selectedTab
                 }
-                _uiState.value = _uiState.value.copy(
+                val destinations = journeys.mapNotNull { journey ->
+                    journey.journey.destinationCity?.takeIf { it.isNotBlank() }
+                        ?: journey.journey.destinationCountryCode?.takeIf { it.isNotBlank() }
+                }.distinct().sorted()
+                val current = _uiState.value
+                val nextTab = if (current.journeys.isEmpty()) preferredTab else current.selectedTab
+                _uiState.value = current.copy(
                     journeys = journeys,
                     upcomingJourneys = upcoming,
                     pastJourneys = past,
-                    selectedTab = if (_uiState.value.journeys.isEmpty()) preferredTab else _uiState.value.selectedTab,
+                    destinationOptions = destinations,
+                    selectedTab = nextTab,
                     unassignedFlights = unassigned,
                     suggestedGroups = journeyRepository.suggestConnectedGroups(unassigned),
-                    isLoading = false
+                    isLoading = false,
+                    visibleJourneys = computeVisible(
+                        tab = nextTab,
+                        upcoming = upcoming,
+                        past = past,
+                        query = current.searchQuery,
+                        destination = current.destinationFilter
+                    )
                 )
             }
         }
     }
 
     fun selectTab(tab: JourneyListTab) {
-        _uiState.value = _uiState.value.copy(selectedTab = tab)
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            selectedTab = tab,
+            visibleJourneys = computeVisible(
+                tab = tab,
+                upcoming = state.upcomingJourneys,
+                past = state.pastJourneys,
+                query = state.searchQuery,
+                destination = state.destinationFilter
+            )
+        )
+    }
+
+    fun setSearchQuery(query: String) {
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            searchQuery = query,
+            visibleJourneys = computeVisible(
+                tab = state.selectedTab,
+                upcoming = state.upcomingJourneys,
+                past = state.pastJourneys,
+                query = query,
+                destination = state.destinationFilter
+            )
+        )
+    }
+
+    fun setDestinationFilter(destination: String?) {
+        val state = _uiState.value
+        val next = if (state.destinationFilter == destination) null else destination
+        _uiState.value = state.copy(
+            destinationFilter = next,
+            visibleJourneys = computeVisible(
+                tab = state.selectedTab,
+                upcoming = state.upcomingJourneys,
+                past = state.pastJourneys,
+                query = state.searchQuery,
+                destination = next
+            )
+        )
     }
 
     fun showCreateDialog(preselected: List<FlightEntity> = emptyList()) {
@@ -121,5 +178,55 @@ class JourneysViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private fun computeVisible(
+        tab: JourneyListTab,
+        upcoming: List<JourneyWithFlights>,
+        past: List<JourneyWithFlights>,
+        query: String,
+        destination: String?
+    ): List<JourneyWithFlights> {
+        val base = when (tab) {
+            JourneyListTab.UPCOMING -> upcoming
+            JourneyListTab.PAST -> past
+        }
+        return base.filter { journeyMatches(it, query, destination) }
+    }
+
+    private fun journeyMatches(
+        journey: JourneyWithFlights,
+        query: String,
+        destination: String?
+    ): Boolean {
+        if (!destination.isNullOrBlank()) {
+            val destOk = listOfNotNull(
+                journey.journey.destinationCity,
+                journey.journey.destinationCountryCode
+            ).any { it.equals(destination, ignoreCase = true) } ||
+                journey.flights.any {
+                    it.arrivalCity.equals(destination, ignoreCase = true) ||
+                        it.arrivalCountryCode.equals(destination, ignoreCase = true)
+                }
+            if (!destOk) return false
+        }
+        val q = query.trim()
+        if (q.isEmpty()) return true
+        val haystack = buildList {
+            add(journey.journey.name)
+            journey.journey.destinationCity?.let(::add)
+            journey.journey.destinationCountryCode?.let(::add)
+            journey.journey.notes?.let(::add)
+            journey.flights.forEach { flight ->
+                flight.airline?.let(::add)
+                flight.flightNumber?.let(::add)
+                flight.bookingReference?.let(::add)
+                flight.departureAirportCode.let(::add)
+                flight.arrivalAirportCode.let(::add)
+                flight.departureCity?.let(::add)
+                flight.arrivalCity?.let(::add)
+            }
+        }.joinToString(" ").lowercase()
+        return q.lowercase().split(Regex("\\s+")).all { token -> haystack.contains(token) }
     }
 }

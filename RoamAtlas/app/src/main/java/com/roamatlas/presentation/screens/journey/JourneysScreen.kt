@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -70,10 +72,7 @@ fun JourneysScreen(
     val state by viewModel.uiState.collectAsState()
     var journeyName by remember { mutableStateOf("") }
     var journeyNotes by remember { mutableStateOf("") }
-    val visibleJourneys = when (state.selectedTab) {
-        JourneyListTab.UPCOMING -> state.upcomingJourneys
-        JourneyListTab.PAST -> state.pastJourneys
-    }
+    val visibleJourneys = state.visibleJourneys
 
     Scaffold(
         topBar = {
@@ -160,14 +159,49 @@ fun JourneysScreen(
                     )
                 }
             }
+            item {
+                OutlinedTextField(
+                    value = state.searchQuery,
+                    onValueChange = viewModel::setSearchQuery,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Search journeys") },
+                    placeholder = { Text("Name, city, airline, flight, booking ref") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null)
+                    }
+                )
+            }
+            if (state.destinationOptions.isNotEmpty()) {
+                item {
+                    Text(
+                        "Destination",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(state.destinationOptions) { destination ->
+                            FilterChip(
+                                selected = state.destinationFilter == destination,
+                                onClick = { viewModel.setDestinationFilter(destination) },
+                                label = { Text(destination) }
+                            )
+                        }
+                    }
+                }
+            }
             if (!state.isLoading && visibleJourneys.isEmpty()) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            when (state.selectedTab) {
-                                JourneyListTab.UPCOMING ->
+                            when {
+                                state.searchQuery.isNotBlank() || state.destinationFilter != null ->
+                                    "No journeys match your search or destination filter."
+                                state.selectedTab == JourneyListTab.UPCOMING ->
                                     "No upcoming journeys. Create one from connected flights, or check Past."
-                                JourneyListTab.PAST ->
+                                else ->
                                     "No past journeys yet. Completed trips will appear here."
                             },
                             modifier = Modifier.padding(18.dp)

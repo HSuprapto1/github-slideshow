@@ -304,12 +304,25 @@ class JourneyRepository @Inject constructor(
             }
         }
         val dir = File(context.filesDir, "journey_photos").apply { mkdirs() }
-        val out = File(dir, "${prefix}_${System.currentTimeMillis()}.jpg")
+        val extension = resolveExtension(uri)
+        val out = File(dir, "${prefix}_${System.currentTimeMillis()}.$extension")
         context.contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { output -> input.copyTo(output) }
         } ?: return null
         Uri.fromFile(out).toString()
     }.getOrNull()
+
+    private fun resolveExtension(uri: Uri): String {
+        val mime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+        val name = uri.lastPathSegment?.lowercase().orEmpty()
+        return when {
+            mime.contains("pdf") || name.endsWith(".pdf") -> "pdf"
+            mime.contains("png") || name.endsWith(".png") -> "png"
+            mime.contains("webp") || name.endsWith(".webp") -> "webp"
+            mime.contains("gif") || name.endsWith(".gif") -> "gif"
+            else -> "jpg"
+        }
+    }
 
     private fun deleteLocalFileUri(uriString: String) {
         runCatching {

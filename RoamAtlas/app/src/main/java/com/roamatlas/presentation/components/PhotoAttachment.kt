@@ -1,6 +1,9 @@
 package com.roamatlas.presentation.components
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -22,13 +25,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,8 +48,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
 
 /**
  * Photo attachment component for adding photos to flights, trips, or locations.
@@ -55,12 +64,54 @@ fun PhotoAttachmentSection(
     modifier: Modifier = Modifier,
     title: String = "Photos",
     maxPhotos: Int = 10,
+    enableCamera: Boolean = true,
     onPhotoClick: ((String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    var showSourceDialog by remember { mutableStateOf(false) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { onAddPhoto(it) }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { saved ->
+        val uri = pendingCameraUri
+        if (saved && uri != null) {
+            onAddPhoto(uri)
+        } else if (uri != null) {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+        pendingCameraUri = null
+    }
+
+    fun launchCamera() {
+        val uri = createPlaceCameraPhotoUri(context)
+        if (uri == null) {
+            Toast.makeText(context, "Could not open camera", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchCamera()
+        else Toast.makeText(context, "Camera permission needed", Toast.LENGTH_SHORT).show()
+    }
+
+    fun startCamera() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
     Column(modifier = modifier) {
@@ -89,7 +140,12 @@ fun PhotoAttachmentSection(
         ) {
             if (photos.size < maxPhotos) {
                 item {
-                    AddPhotoButton(onGalleryClick = { galleryLauncher.launch("image/*") })
+                    AddPhotoButton(
+                        onClick = {
+                            if (enableCamera) showSourceDialog = true
+                            else galleryLauncher.launch("image/*")
+                        }
+                    )
                 }
             }
 
@@ -102,16 +158,53 @@ fun PhotoAttachmentSection(
             }
         }
     }
+
+    if (showSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showSourceDialog = false },
+            title = { Text("Add photo") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showSourceDialog = false
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("Gallery")
+                    }
+                    TextButton(
+                        onClick = {
+                            showSourceDialog = false
+                            startCamera()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("Camera")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSourceDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
 private fun AddPhotoButton(
-    onGalleryClick: () -> Unit
+    onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .size(100.dp)
-            .clickable { onGalleryClick() },
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
@@ -197,7 +290,7 @@ fun PhotoGalleryPreview(
     modifier: Modifier = Modifier
 ) {
     if (photos.isEmpty()) return
-    
+
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -205,7 +298,7 @@ fun PhotoGalleryPreview(
     ) {
         items(photos.size) { index ->
             val context = LocalContext.current
-            
+
             Card(
                 modifier = Modifier
                     .size(80.dp)
@@ -237,7 +330,7 @@ fun PhotoFullScreenViewer(
 ) {
     var currentIndex by remember { mutableStateOf(initialIndex) }
     val context = LocalContext.current
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
