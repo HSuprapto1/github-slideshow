@@ -185,6 +185,13 @@ fun RoamAtlasApp(
                         }
                     )
                 }
+                composable(Screen.Photos.route) {
+                    PhotosScreen(
+                        onOpenMap = { date ->
+                            navController.navigate(Screen.Map.forDate(date.toString()))
+                        }
+                    )
+                }
                 composable(Screen.Statistics.route) {
                     StatisticsScreen(
                         onOpenCountry = { countryCode ->
