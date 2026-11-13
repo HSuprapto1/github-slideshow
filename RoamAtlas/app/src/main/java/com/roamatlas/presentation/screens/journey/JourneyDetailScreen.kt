@@ -1,5 +1,9 @@
 package com.roamatlas.presentation.screens.journey
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,9 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -45,11 +51,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
@@ -63,6 +72,8 @@ import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.presentation.components.PhotoAttachmentSection
+import com.roamatlas.presentation.components.PhotoFullScreenViewer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,6 +92,8 @@ fun JourneyDetailScreen(
     var showShare by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var editingFlight by remember { mutableStateOf<FlightEntity?>(null) }
+    var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
+    var fullscreenIndex by remember { mutableStateOf(0) }
 
     LaunchedEffect(state.wasDeleted) {
         if (state.wasDeleted) onNavigateBack()
@@ -128,6 +141,7 @@ fun JourneyDetailScreen(
                 }
             }
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+            state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
                 item { JourneyHeader(value, state.nowMillis) }
                 if (value.journey.notes != null) {
@@ -139,6 +153,19 @@ fun JourneyDetailScreen(
                             }
                         }
                     }
+                }
+                item {
+                    JourneyPhotosSection(
+                        photos = value.photoUris,
+                        coverUri = value.journey.coverPhotoUri,
+                        onAddPhoto = viewModel::addJourneyPhoto,
+                        onRemovePhoto = viewModel::removeJourneyPhoto,
+                        onSetCover = viewModel::setCoverPhoto,
+                        onOpenPhoto = { photos, index ->
+                            fullscreenPhotos = photos
+                            fullscreenIndex = index
+                        }
+                    )
                 }
                 item { JourneyRouteMap(value, state.airports) }
                 if (value.connections.isNotEmpty()) {
@@ -169,12 +196,30 @@ fun JourneyDetailScreen(
                         flight = flight,
                         departureAirport = state.airports[flight.departureAirportCode],
                         arrivalAirport = state.airports[flight.arrivalAirportCode],
-                        onEdit = { editingFlight = flight }
+                        onEdit = { editingFlight = flight },
+                        onSetTicketPhoto = { uri ->
+                            viewModel.setFlightTicketPhoto(flight.id, uri)
+                        },
+                        onClearTicketPhoto = {
+                            viewModel.setFlightTicketPhoto(flight.id, null)
+                        },
+                        onOpenTicketPhoto = { uri ->
+                            fullscreenPhotos = listOf(uri)
+                            fullscreenIndex = 0
+                        }
                     )
                 }
                 item { Spacer(Modifier.height(50.dp)) }
             }
         }
+    }
+
+    fullscreenPhotos?.let { photos ->
+        PhotoFullScreenViewer(
+            photos = photos,
+            initialIndex = fullscreenIndex,
+            onDismiss = { fullscreenPhotos = null }
+        )
     }
 
     if (showEditJourney && journey != null) {
@@ -271,7 +316,7 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
         now < first -> "Departs in ${formatDuration((first - now) / 60_000)}"
         final != null && now <= final && nextFlight != null ->
             "Next flight in ${formatDuration(((nextFlight.estimatedDepartureTimeMillis ?: nextFlight.departureTimeMillis) - now) / 60_000)}"
-        final != null && now > final -> "Journey completed"
+        final != null && now > final -> "Past journey · completed"
         else -> "Journey in progress"
     }
     Card(
@@ -284,6 +329,17 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            journey.journey.coverPhotoUri?.takeIf { it.isNotBlank() }?.let { cover ->
+                AsyncImage(
+                    model = Uri.parse(cover),
+                    contentDescription = "Journey cover",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            }
             Text(headline, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             if (journey.flights.isNotEmpty()) {
                 Text(
@@ -296,6 +352,73 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                 "${journey.flights.size} flights · ${formatDuration(journey.totalJourneyMinutes)} journey · " +
                     "${formatDuration(journey.totalTransitMinutes)} current transit estimate"
             )
+        }
+    }
+}
+
+@Composable
+private fun JourneyPhotosSection(
+    photos: List<String>,
+    coverUri: String?,
+    onAddPhoto: (Uri) -> Unit,
+    onRemovePhoto: (String) -> Unit,
+    onSetCover: (String) -> Unit,
+    onOpenPhoto: (List<String>, Int) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Trip photos",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Add tickets, boarding passes, or trip memories. Tap a photo to view full size. Long-press isn’t needed — use × to remove, or Set cover below.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            PhotoAttachmentSection(
+                photos = photos,
+                onAddPhoto = onAddPhoto,
+                onRemovePhoto = onRemovePhoto,
+                title = "Album",
+                maxPhotos = 20,
+                onPhotoClick = { uri ->
+                    val index = photos.indexOf(uri).coerceAtLeast(0)
+                    onOpenPhoto(photos, index)
+                }
+            )
+            if (photos.isNotEmpty()) {
+                Text("Cover photo", fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    photos.take(5).forEach { uri ->
+                        val selected = uri == coverUri
+                        AsyncImage(
+                            model = Uri.parse(uri),
+                            contentDescription = "Set as cover",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSetCover(uri) }
+                                .then(
+                                    if (selected) {
+                                        Modifier.padding(0.dp)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                        )
+                    }
+                }
+                Text(
+                    if (coverUri != null) "Tap another photo above to change the cover."
+                    else "Tap a photo to set it as the journey cover.",
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
         }
     }
 }
@@ -416,8 +539,16 @@ private fun FlightLegCard(
     flight: FlightEntity,
     departureAirport: Airport?,
     arrivalAirport: Airport?,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onSetTicketPhoto: (Uri) -> Unit,
+    onClearTicketPhoto: () -> Unit,
+    onOpenTicketPhoto: (String) -> Unit
 ) {
+    val ticketLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let(onSetTicketPhoto)
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -470,6 +601,35 @@ private fun FlightLegCard(
                 },
                 style = MaterialTheme.typography.bodySmall
             )
+            Text("Ticket / boarding pass", fontWeight = FontWeight.SemiBold)
+            val ticketUri = flight.photoUri
+            if (!ticketUri.isNullOrBlank()) {
+                AsyncImage(
+                    model = Uri.parse(ticketUri),
+                    contentDescription = "Ticket photo",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenTicketPhoto(ticketUri) }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { ticketLauncher.launch("image/*") }) {
+                        Text("Replace")
+                    }
+                    TextButton(onClick = onClearTicketPhoto) {
+                        Text("Remove")
+                    }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { ticketLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add ticket or boarding pass photo")
+                }
+            }
         }
     }
 }

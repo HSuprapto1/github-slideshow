@@ -29,6 +29,8 @@ data class MapUiState(
     val showGps: Boolean = true,
     val showTimeline: Boolean = true,
     val showPhoto: Boolean = true,
+    /** Connecting lines between GPS/timeline points. Off by default to reduce map clutter. */
+    val showTrackLines: Boolean = false,
     val showFilters: Boolean = false,
     val isLoading: Boolean = true,
     val mapCenterLat: Double = 0.0,
@@ -257,9 +259,14 @@ class MapViewModel @Inject constructor(
             filterCountryCode = null,
             showGps = true,
             showTimeline = true,
-            showPhoto = true
+            showPhoto = true,
+            showTrackLines = false
         )
         loadLocations()
+    }
+
+    fun setShowTrackLines(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showTrackLines = show)
     }
 
     fun toggleFilters() {

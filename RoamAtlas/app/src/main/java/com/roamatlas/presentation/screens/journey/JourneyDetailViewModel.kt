@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.journey
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,7 +23,8 @@ data class JourneyDetailUiState(
     val nowMillis: Long = System.currentTimeMillis(),
     val isLoading: Boolean = true,
     val wasDeleted: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val message: String? = null
 )
 
 @HiltViewModel
@@ -60,6 +62,42 @@ class JourneyDetailViewModel @Inject constructor(
     fun updateJourney(name: String, notes: String) {
         viewModelScope.launch {
             journeyRepository.updateJourney(journeyId, name, notes)
+        }
+    }
+
+    fun addJourneyPhoto(uri: Uri) {
+        viewModelScope.launch {
+            val ok = journeyRepository.addJourneyPhoto(journeyId, uri)
+            _uiState.value = _uiState.value.copy(
+                message = if (ok) "Photo added to journey." else "Could not add photo.",
+                errorMessage = if (ok) null else "Could not add journey photo."
+            )
+        }
+    }
+
+    fun removeJourneyPhoto(photoUri: String) {
+        viewModelScope.launch {
+            journeyRepository.removeJourneyPhoto(journeyId, photoUri)
+        }
+    }
+
+    fun setCoverPhoto(photoUri: String) {
+        viewModelScope.launch {
+            journeyRepository.setJourneyCoverPhoto(journeyId, photoUri)
+        }
+    }
+
+    fun setFlightTicketPhoto(flightId: Long, uri: Uri?) {
+        viewModelScope.launch {
+            val ok = journeyRepository.setFlightTicketPhoto(flightId, uri)
+            _uiState.value = _uiState.value.copy(
+                message = when {
+                    !ok -> null
+                    uri == null -> "Ticket photo removed."
+                    else -> "Ticket / boarding pass saved."
+                },
+                errorMessage = if (ok) null else "Could not save ticket photo."
+            )
         }
     }
 

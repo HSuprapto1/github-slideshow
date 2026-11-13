@@ -1,11 +1,17 @@
 package com.roamatlas.data.journey
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.TripEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import org.json.JSONArray
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import javax.inject.Inject
@@ -57,6 +63,15 @@ data class JourneyWithFlights(
     val totalTransitMinutes: Long
         get() = connections.sumOf { it.effectiveMinutes.coerceAtLeast(0) }
 
+    val photoUris: List<String>
+        get() = decodePhotoUris(journey.photoUrisJson)
+
+    val isPast: Boolean
+        get() {
+            val end = finalArrivalMillis ?: firstDepartureMillis ?: return false
+            return end < System.currentTimeMillis()
+        }
+
     val connections: List<JourneyConnection>
         get() = orderedFlights.zipWithNext().map { (arriving, departing) ->
             val scheduled = (departing.departureTimeMillis - arriving.arrivalTimeMillis) / 60_000
@@ -88,6 +103,7 @@ data class JourneyWithFlights(
 
 @Singleton
 class JourneyRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val tripDao: TripDao,
     private val flightDao: FlightDao
 ) {
@@ -161,6 +177,65 @@ class JourneyRepository @Inject constructor(
         )
     }
 
+    suspend fun addJourneyPhoto(journeyId: Long, uri: Uri): Boolean {
+        val journey = tripDao.getById(journeyId) ?: return false
+        val stored = persistPhoto(uri, "journey_${journeyId}") ?: return false
+        val photos = decodePhotoUris(journey.photoUrisJson).toMutableList()
+        if (stored in photos) return true
+        photos.add(stored)
+        tripDao.update(
+            journey.copy(
+                photoUrisJson = encodePhotoUris(photos),
+                coverPhotoUri = journey.coverPhotoUri ?: stored,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+        return true
+    }
+
+    suspend fun removeJourneyPhoto(journeyId: Long, photoUri: String) {
+        val journey = tripDao.getById(journeyId) ?: return
+        val photos = decodePhotoUris(journey.photoUrisJson).filterNot { it == photoUri }
+        val cover = when {
+            journey.coverPhotoUri == photoUri -> photos.firstOrNull()
+            else -> journey.coverPhotoUri
+        }
+        tripDao.update(
+            journey.copy(
+                photoUrisJson = encodePhotoUris(photos),
+                coverPhotoUri = cover,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+        deleteLocalFileUri(photoUri)
+    }
+
+    suspend fun setJourneyCoverPhoto(journeyId: Long, photoUri: String?) {
+        val journey = tripDao.getById(journeyId) ?: return
+        tripDao.update(
+            journey.copy(
+                coverPhotoUri = photoUri,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun setFlightTicketPhoto(flightId: Long, uri: Uri?): Boolean {
+        val flight = flightDao.getFlightById(flightId) ?: return false
+        val previous = flight.photoUri
+        val stored = uri?.let { persistPhoto(it, "ticket_${flightId}") }
+        flightDao.update(
+            flight.copy(
+                photoUri = stored,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+        if (!previous.isNullOrBlank() && previous != stored) {
+            deleteLocalFileUri(previous)
+        }
+        return true
+    }
+
     suspend fun updateFlightOperationalDetails(
         flight: FlightEntity,
         estimatedDepartureTimeMillis: Long?,
@@ -219,6 +294,32 @@ class JourneyRepository @Inject constructor(
         return groups.filter { it.size >= 2 }
     }
 
+    private fun persistPhoto(uri: Uri, prefix: String): String? = runCatching {
+        if (uri.scheme == "content") {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+        }
+        val dir = File(context.filesDir, "journey_photos").apply { mkdirs() }
+        val out = File(dir, "${prefix}_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        Uri.fromFile(out).toString()
+    }.getOrNull()
+
+    private fun deleteLocalFileUri(uriString: String) {
+        runCatching {
+            val uri = Uri.parse(uriString)
+            if (uri.scheme == "file") {
+                uri.path?.let { File(it).delete() }
+            }
+        }
+    }
+
     private fun replaceAirportDetails(
         notes: String?,
         terminal: String?,
@@ -243,4 +344,22 @@ class JourneyRepository @Inject constructor(
         }
         return retained.joinToString("\n").takeIf { it.isNotBlank() }
     }
+}
+
+internal fun decodePhotoUris(json: String?): List<String> {
+    if (json.isNullOrBlank()) return emptyList()
+    return runCatching {
+        val array = JSONArray(json)
+        buildList {
+            for (index in 0 until array.length()) {
+                array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
+internal fun encodePhotoUris(uris: List<String>): String? {
+    val unique = uris.filter { it.isNotBlank() }.distinct()
+    if (unique.isEmpty()) return null
+    return JSONArray(unique).toString()
 }

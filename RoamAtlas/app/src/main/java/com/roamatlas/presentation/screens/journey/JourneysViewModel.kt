@@ -13,8 +13,16 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class JourneyListTab {
+    UPCOMING,
+    PAST
+}
+
 data class JourneysUiState(
     val journeys: List<JourneyWithFlights> = emptyList(),
+    val upcomingJourneys: List<JourneyWithFlights> = emptyList(),
+    val pastJourneys: List<JourneyWithFlights> = emptyList(),
+    val selectedTab: JourneyListTab = JourneyListTab.UPCOMING,
     val unassignedFlights: List<FlightEntity> = emptyList(),
     val suggestedGroups: List<List<FlightEntity>> = emptyList(),
     val showCreateDialog: Boolean = false,
@@ -38,14 +46,32 @@ class JourneysViewModel @Inject constructor(
             ) { journeys, unassigned ->
                 journeys to unassigned
             }.collect { (journeys, unassigned) ->
+                val upcoming = journeys
+                    .filterNot { it.isPast }
+                    .sortedBy { it.firstDepartureMillis ?: Long.MAX_VALUE }
+                val past = journeys
+                    .filter { it.isPast }
+                    .sortedByDescending { it.firstDepartureMillis ?: 0L }
+                val preferredTab = when {
+                    upcoming.isNotEmpty() -> JourneyListTab.UPCOMING
+                    past.isNotEmpty() -> JourneyListTab.PAST
+                    else -> _uiState.value.selectedTab
+                }
                 _uiState.value = _uiState.value.copy(
                     journeys = journeys,
+                    upcomingJourneys = upcoming,
+                    pastJourneys = past,
+                    selectedTab = if (_uiState.value.journeys.isEmpty()) preferredTab else _uiState.value.selectedTab,
                     unassignedFlights = unassigned,
                     suggestedGroups = journeyRepository.suggestConnectedGroups(unassigned),
                     isLoading = false
                 )
             }
         }
+    }
+
+    fun selectTab(tab: JourneyListTab) {
+        _uiState.value = _uiState.value.copy(selectedTab = tab)
     }
 
     fun showCreateDialog(preselected: List<FlightEntity> = emptyList()) {

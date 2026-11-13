@@ -9,6 +9,9 @@
     <files-path
         name="photo_thumbs"
         path="photo_thumbs/" />
+    <files-path
+        name="journey_photos"
+        path="journey_photos/" />
     <cache-path
         name="shared_photos"
         path="shared_photos/" />

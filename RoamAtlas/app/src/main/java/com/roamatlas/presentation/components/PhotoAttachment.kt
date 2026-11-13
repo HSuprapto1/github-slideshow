@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,22 +11,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -58,23 +53,16 @@ fun PhotoAttachmentSection(
     onAddPhoto: (Uri) -> Unit,
     onRemovePhoto: (String) -> Unit,
     modifier: Modifier = Modifier,
-    maxPhotos: Int = 10
+    title: String = "Photos",
+    maxPhotos: Int = 10,
+    onPhotoClick: ((String) -> Unit)? = null
 ) {
-    var showSourceDialog by remember { mutableStateOf(false) }
-    
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { onAddPhoto(it) }
     }
-    
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        // Handle camera result
-        // Note: For camera, you need to create a temp file URI before launching
-    }
-    
+
     Column(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -82,7 +70,7 @@ fun PhotoAttachmentSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Photos",
+                text = title,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -92,28 +80,24 @@ fun PhotoAttachmentSection(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
-        
+
         Spacer(modifier = Modifier.height(8.dp))
-        
+
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 4.dp)
         ) {
-            // Add photo button
             if (photos.size < maxPhotos) {
                 item {
-                    AddPhotoButton(
-                        onGalleryClick = { galleryLauncher.launch("image/*") },
-                        onCameraClick = { /* Launch camera */ }
-                    )
+                    AddPhotoButton(onGalleryClick = { galleryLauncher.launch("image/*") })
                 }
             }
-            
-            // Existing photos
+
             items(photos) { photoUri ->
                 PhotoThumbnail(
                     uri = photoUri,
-                    onRemove = { onRemovePhoto(photoUri) }
+                    onRemove = { onRemovePhoto(photoUri) },
+                    onClick = onPhotoClick?.let { handler -> { handler(photoUri) } }
                 )
             }
         }
@@ -122,8 +106,7 @@ fun PhotoAttachmentSection(
 
 @Composable
 private fun AddPhotoButton(
-    onGalleryClick: () -> Unit,
-    onCameraClick: () -> Unit
+    onGalleryClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -160,14 +143,18 @@ private fun AddPhotoButton(
 @Composable
 private fun PhotoThumbnail(
     uri: String,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    
+
     Box(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+            )
     ) {
         AsyncImage(
             model = ImageRequest.Builder(context)
@@ -178,8 +165,7 @@ private fun PhotoThumbnail(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-        
-        // Remove button
+
         IconButton(
             onClick = onRemove,
             modifier = Modifier
@@ -256,8 +242,12 @@ fun PhotoFullScreenViewer(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable { onDismiss() }
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss)
+        )
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(photos.getOrNull(currentIndex))
@@ -266,11 +256,11 @@ fun PhotoFullScreenViewer(
             contentDescription = "Photo",
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .clickable(onClick = onDismiss),
             contentScale = ContentScale.Fit
         )
-        
-        // Close button
+
         IconButton(
             onClick = onDismiss,
             modifier = Modifier
@@ -284,8 +274,7 @@ fun PhotoFullScreenViewer(
                 modifier = Modifier.size(32.dp)
             )
         }
-        
-        // Photo counter
+
         if (photos.size > 1) {
             Text(
                 text = "${currentIndex + 1} / ${photos.size}",

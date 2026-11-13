@@ -229,9 +229,9 @@ fun MapScreenV2(
                         uiState.locations
                     }
 
-                    // Draw the day track only for GPS/timeline points — not between photo pins.
+                    // Optional track lines (off by default — map stays readable).
                     val trackPoints = displayLocations.filter { it.photoUri.isNullOrBlank() }
-                    if (trackPoints.size >= 2) {
+                    if (uiState.showTrackLines && trackPoints.size >= 2) {
                         Polyline(
                             points = trackPoints.map {
                                 LatLng(it.latitude, it.longitude)
@@ -262,6 +262,7 @@ fun MapScreenV2(
                     showGps = uiState.showGps,
                     showTimeline = uiState.showTimeline,
                     showPhoto = uiState.showPhoto,
+                    showTrackLines = uiState.showTrackLines,
                     onCountrySelected = { viewModel.setCountryFilter(it) },
                     onSourceFilterChange = { gps, timeline, photo ->
                         viewModel.setSourceFilters(
@@ -270,6 +271,7 @@ fun MapScreenV2(
                             showPhoto = photo
                         )
                     },
+                    onTrackLinesChange = { viewModel.setShowTrackLines(it) },
                     onClearFilters = { viewModel.clearFilters() }
                 )
             }
@@ -387,8 +389,10 @@ private fun FilterBar(
     showGps: Boolean,
     showTimeline: Boolean,
     showPhoto: Boolean,
+    showTrackLines: Boolean,
     onCountrySelected: (String?) -> Unit,
     onSourceFilterChange: (Boolean, Boolean, Boolean) -> Unit,
+    onTrackLinesChange: (Boolean) -> Unit,
     onClearFilters: () -> Unit
 ) {
     Surface(
@@ -452,6 +456,26 @@ private fun FilterBar(
                     )
                 }
             }
+
+            Text(
+                text = "Display",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = showTrackLines,
+                        onClick = { onTrackLinesChange(!showTrackLines) },
+                        label = { Text("Track lines") }
+                    )
+                }
+            }
+            Text(
+                text = "Track lines connect GPS/history points. Leave off for a clearer map.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Text(
                 text = "Country",
