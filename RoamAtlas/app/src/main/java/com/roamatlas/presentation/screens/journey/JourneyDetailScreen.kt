@@ -28,11 +28,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -81,12 +88,16 @@ import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.presentation.components.PhotoAttachmentSection
 import com.roamatlas.presentation.components.PhotoFullScreenViewer
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
 import java.io.File
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Date
@@ -98,6 +109,7 @@ import java.util.TimeZone
 fun JourneyDetailScreen(
     onNavigateBack: () -> Unit,
     onOpenMap: (java.time.LocalDate, String?) -> Unit = { _, _ -> },
+    onAddToJourney: (Long, String) -> Unit = { _, _ -> },
     viewModel: JourneyDetailViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -106,6 +118,7 @@ fun JourneyDetailScreen(
     var showEditJourney by remember { mutableStateOf(false) }
     var showShare by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
     var editingFlight by remember { mutableStateOf<FlightEntity?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -171,66 +184,32 @@ fun JourneyDetailScreen(
                     }
                 }
                 item {
-                    JourneyPhotosSection(
-                        photos = value.photoUris,
-                        coverUri = value.journey.coverPhotoUri,
-                        onAddPhoto = viewModel::addJourneyPhoto,
-                        onRemovePhoto = viewModel::removeJourneyPhoto,
-                        onSetCover = viewModel::setCoverPhoto,
-                        onOpenPhoto = { photos, index ->
-                            fullscreenPhotos = photos
-                            fullscreenIndex = index
-                        }
-                    )
-                }
-                if (state.journeyDays.isNotEmpty() || state.timelinePhotos.isNotEmpty()) {
-                    item {
-                        JourneyTimelineSection(
-                            days = state.journeyDays,
-                            trackedDayCount = state.trackedDayCount,
-                            timelinePhotos = state.timelinePhotos,
-                            onImportPhotos = viewModel::importTimelinePhotosToAlbum,
-                            onOpenPhoto = { photos, index ->
-                                fullscreenPhotos = photos
-                                fullscreenIndex = index
-                            },
-                            onOpenDay = { day ->
-                                onOpenMap(day.date, day.countryCode)
-                            }
-                        )
-                    }
-                }
-                item {
-                    JourneyRouteMap(
-                        journey = value,
-                        airports = state.airports,
-                        gpsTrack = state.gpsTrack,
-                        showGpsTrack = state.showGpsTrack,
-                        onToggleGpsTrack = viewModel::setShowGpsTrack
-                    )
-                }
-                if (value.connections.isNotEmpty()) {
-                    item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "Connections",
+                            "Timeline",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            "Warnings use your chosen minimum, or a conservative default of 2 hours at the same airport and 4 hours for an airport change.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    items(value.connections) { connection ->
-                        ConnectionCard(connection)
+                        Button(onClick = { showAddMenu = true }) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.size(6.dp))
+                            Text("Add to journey")
+                        }
                     }
                 }
-                item {
-                    Text(
-                        "Flights",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (value.orderedFlights.isEmpty()) {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                "No legs yet. Add a flight, train, bus, or hotel to build this trip.",
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    }
                 }
                 items(value.orderedFlights, key = { it.id }) { flight ->
                     FlightLegCard(
@@ -252,6 +231,61 @@ fun JourneyDetailScreen(
                                 fullscreenIndex = 0
                             }
                         }
+                    )
+                }
+                if (value.connections.isNotEmpty()) {
+                    item {
+                        Text(
+                            "Connections",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Warnings use your chosen minimum, or a conservative default of 2 hours at the same airport and 4 hours for an airport change.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    items(value.connections) { connection ->
+                        ConnectionCard(connection)
+                    }
+                }
+                if (state.journeyDays.isNotEmpty() || state.timelinePhotos.isNotEmpty()) {
+                    item {
+                        JourneyTimelineSection(
+                            days = state.journeyDays,
+                            trackedDayCount = state.trackedDayCount,
+                            timelinePhotos = state.timelinePhotos,
+                            onImportPhotos = viewModel::importTimelinePhotosToAlbum,
+                            onOpenPhoto = { photos, index ->
+                                fullscreenPhotos = photos
+                                fullscreenIndex = index
+                            },
+                            onOpenDay = { day ->
+                                onOpenMap(day.date, day.countryCode)
+                            }
+                        )
+                    }
+                }
+                item {
+                    JourneyPhotosSection(
+                        photos = value.photoUris,
+                        coverUri = value.journey.coverPhotoUri,
+                        onAddPhoto = viewModel::addJourneyPhoto,
+                        onRemovePhoto = viewModel::removeJourneyPhoto,
+                        onSetCover = viewModel::setCoverPhoto,
+                        onOpenPhoto = { photos, index ->
+                            fullscreenPhotos = photos
+                            fullscreenIndex = index
+                        }
+                    )
+                }
+                item {
+                    JourneyRouteMap(
+                        journey = value,
+                        airports = state.airports,
+                        gpsTrack = state.gpsTrack,
+                        showGpsTrack = state.showGpsTrack,
+                        onToggleGpsTrack = viewModel::setShowGpsTrack
                     )
                 }
                 item { Spacer(Modifier.height(50.dp)) }
@@ -278,12 +312,41 @@ fun JourneyDetailScreen(
         )
     }
 
+    if (showAddMenu && journey != null) {
+        AlertDialog(
+            onDismissRequest = { showAddMenu = false },
+            title = { Text("Add to journey") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        TransportMode.FLIGHT to "Flight",
+                        TransportMode.TRAIN to "Train",
+                        TransportMode.BUS to "Bus",
+                        TransportMode.HOTEL to "Hotel"
+                    ).forEach { (mode, label) ->
+                        TextButton(
+                            onClick = {
+                                showAddMenu = false
+                                onAddToJourney(journey.journey.id, mode)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(label) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAddMenu = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showEditJourney && journey != null) {
         EditJourneyDialog(
             journey = journey,
             onDismiss = { showEditJourney = false },
-            onSave = { name, notes ->
-                viewModel.updateJourney(name, notes)
+            onSave = { name, notes, startDay, endDay ->
+                viewModel.updateJourney(name, notes, startDay, endDay)
                 showEditJourney = false
             }
         )
@@ -365,14 +428,29 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
     val first = journey.firstDepartureMillis
     val final = journey.finalArrivalMillis
     val nextFlight = journey.orderedFlights.firstOrNull {
-        (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > now
+        !TransportMode.isHotel(it.transportMode) &&
+            (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > now
+    }
+    val start = LocalDate.ofEpochDay(journey.journey.startDateEpochDay)
+    val end = LocalDate.ofEpochDay(
+        journey.journey.endDateEpochDay ?: journey.journey.startDateEpochDay
+    )
+    val dateFmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    val status = when {
+        journey.isPast -> "Past"
+        first != null && now < first -> "Upcoming"
+        else -> "In progress"
     }
     val headline = when {
-        first == null -> "No flights"
-        now < first -> "Departs in ${formatDuration((first - now) / 60_000)}"
+        journey.orderedFlights.isEmpty() -> "Trip shell · add your first leg"
+        first != null && now < first ->
+            "Departs in ${formatDuration((first - now) / 60_000)}"
         final != null && now <= final && nextFlight != null ->
-            "Next flight in ${formatDuration(((nextFlight.estimatedDepartureTimeMillis ?: nextFlight.departureTimeMillis) - now) / 60_000)}"
-        final != null && now > final -> "Past journey · completed"
+            "Next ${TransportMode.label(nextFlight.transportMode).lowercase()} in " +
+                formatDuration(
+                    ((nextFlight.estimatedDepartureTimeMillis ?: nextFlight.departureTimeMillis) - now) / 60_000
+                )
+        journey.isPast -> "Past journey · completed"
         else -> "Journey in progress"
     }
     Card(
@@ -396,18 +474,24 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                         .clip(RoundedCornerShape(12.dp))
                 )
             }
+            AssistChip(onClick = {}, enabled = false, label = { Text(status) })
             Text(headline, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            if (journey.flights.isNotEmpty()) {
-                Text(
-                    journey.orderedFlights.joinToString(" → ") { it.departureAirportCode } +
-                        " → ${journey.orderedFlights.last().arrivalAirportCode}",
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
             Text(
-                "${journey.flights.size} flights · ${formatDuration(journey.totalJourneyMinutes)} journey · " +
-                    "${formatDuration(journey.totalTransitMinutes)} current transit estimate"
+                if (start == end) start.format(dateFmt) else "${start.format(dateFmt)} – ${end.format(dateFmt)}",
+                style = MaterialTheme.typography.titleMedium
             )
+            if (journey.flights.isNotEmpty()) {
+                val route = journey.orderedFlights
+                    .filterNot { TransportMode.isHotel(it.transportMode) }
+                if (route.isNotEmpty()) {
+                    Text(
+                        route.joinToString(" → ") { it.departureAirportCode } +
+                            " → ${route.last().arrivalAirportCode}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+            Text(journey.legSummaryText, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -568,7 +652,10 @@ private fun JourneyRouteMap(
     showGpsTrack: Boolean,
     onToggleGpsTrack: (Boolean) -> Unit
 ) {
-    val airportPoints = journey.orderedFlights.flatMap { flight ->
+    val transportFlights = journey.orderedFlights.filterNot {
+        TransportMode.isHotel(it.transportMode)
+    }
+    val airportPoints = transportFlights.flatMap { flight ->
         listOfNotNull(
             airports[flight.departureAirportCode]?.let { LatLng(it.latitude, it.longitude) },
             airports[flight.arrivalAirportCode]?.let { LatLng(it.latitude, it.longitude) }
@@ -620,7 +707,7 @@ private fun JourneyRouteMap(
             cameraPositionState = cameraState
         ) {
             airports.values.filter { airport ->
-                journey.orderedFlights.any {
+                transportFlights.any {
                     it.departureAirportCode == airport.iataCode ||
                         it.arrivalAirportCode == airport.iataCode
                 }
@@ -631,7 +718,7 @@ private fun JourneyRouteMap(
                     snippet = airport.city
                 )
             }
-            journey.orderedFlights.forEach { flight ->
+            transportFlights.forEach { flight ->
                 val departure = airports[flight.departureAirportCode]
                 val arrival = airports[flight.arrivalAirportCode]
                 if (departure != null && arrival != null) {
@@ -774,41 +861,73 @@ private fun FlightLegCard(
                 )
                 TextButton(onClick = onEdit) { Text("Update") }
             }
-            Text(
-                "${flight.departureAirportCode} · ${departureAirport?.name ?: flight.departureAirportName ?: "Unknown airport"}"
-            )
-            Text(
-                formatAirportTime(
-                    flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis,
-                    departureAirport
+            val isHotel = TransportMode.isHotel(flight.transportMode)
+            if (isHotel) {
+                Text(
+                    flight.departureCity
+                        ?: departureAirport?.city
+                        ?: flight.departureAirportCode
                 )
-            )
-            Text(
-                "↓  ${flight.arrivalAirportCode} · ${arrivalAirport?.name ?: flight.arrivalAirportName ?: "Unknown airport"}"
-            )
-            Text(
-                formatAirportTime(
-                    flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis,
-                    arrivalAirport
+                Text(
+                    "Check-in · " + formatAirportTime(
+                        flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis,
+                        departureAirport
+                    )
                 )
-            )
-            flight.flightStatus?.let { Text("Status: $it", fontWeight = FontWeight.SemiBold) }
+                Text(
+                    "Check-out · " + formatAirportTime(
+                        flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis,
+                        arrivalAirport
+                    )
+                )
+                flight.bookingReference?.takeIf { it.isNotBlank() }?.let {
+                    Text("Booking ref · $it", style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Text(
+                    "${flight.departureAirportCode} · ${departureAirport?.name ?: flight.departureAirportName ?: "Unknown airport"}"
+                )
+                Text(
+                    formatAirportTime(
+                        flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis,
+                        departureAirport
+                    )
+                )
+                Text(
+                    "↓  ${flight.arrivalAirportCode} · ${arrivalAirport?.name ?: flight.arrivalAirportName ?: "Unknown airport"}"
+                )
+                Text(
+                    formatAirportTime(
+                        flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis,
+                        arrivalAirport
+                    )
+                )
+                flight.flightStatus?.let { Text("Status: $it", fontWeight = FontWeight.SemiBold) }
+                if (TransportMode.isFlight(flight.transportMode)) {
+                    Text(
+                        "Aircraft: ${flight.aircraftType ?: "Not available yet"} · Seat: ${flight.seatNumber ?: "Not available yet"}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    val gate = noteValue(flight.notes, "Departure gate")
+                    val terminal = noteValue(flight.notes, "Departure terminal")
+                    Text(
+                        listOfNotNull(
+                            terminal?.let { "Terminal $it" },
+                            gate?.let { "Gate $it" }
+                        ).joinToString(" · ").ifBlank {
+                            "Gate not available—check the airline or airport display."
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                flight.bookingReference?.takeIf { it.isNotBlank() }?.let {
+                    Text("Booking ref · $it", style = MaterialTheme.typography.bodySmall)
+                }
+            }
             Text(
-                "Aircraft: ${flight.aircraftType ?: "Not available yet"} · Seat: ${flight.seatNumber ?: "Not available yet"}",
-                style = MaterialTheme.typography.bodySmall
+                if (isHotel) "Confirmation / voucher" else "Ticket / boarding pass",
+                fontWeight = FontWeight.SemiBold
             )
-            val gate = noteValue(flight.notes, "Departure gate")
-            val terminal = noteValue(flight.notes, "Departure terminal")
-            Text(
-                listOfNotNull(
-                    terminal?.let { "Terminal $it" },
-                    gate?.let { "Gate $it" }
-                ).joinToString(" · ").ifBlank {
-                    "Gate not available—check the airline or airport display."
-                },
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text("Ticket / boarding pass", fontWeight = FontWeight.SemiBold)
             val ticketUri = flight.photoUri
             if (!ticketUri.isNullOrBlank()) {
                 if (isPdfAttachment(ticketUri)) {
@@ -914,10 +1033,23 @@ private fun openTicketAttachment(context: android.content.Context, uriString: St
 private fun EditJourneyDialog(
     journey: JourneyWithFlights,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit
+    onSave: (String, String, Long, Long) -> Unit
 ) {
     var name by remember { mutableStateOf(journey.journey.name) }
     var notes by remember { mutableStateOf(journey.journey.notes.orEmpty()) }
+    var startDate by remember {
+        mutableStateOf(LocalDate.ofEpochDay(journey.journey.startDateEpochDay))
+    }
+    var endDate by remember {
+        mutableStateOf(
+            LocalDate.ofEpochDay(
+                journey.journey.endDateEpochDay ?: journey.journey.startDateEpochDay
+            )
+        )
+    }
+    var pickingStart by remember { mutableStateOf(false) }
+    var pickingEnd by remember { mutableStateOf(false) }
+    val dateFmt = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit journey") },
@@ -929,21 +1061,93 @@ private fun EditJourneyDialog(
                     label = { Text("Journey name") },
                     singleLine = true
                 )
+                Text(
+                    "Trip dates stay independent of flight times, so delays or early arrivals do not force a rewrite.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                TextButton(onClick = { pickingStart = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Start: ${startDate.format(dateFmt)}")
+                }
+                TextButton(onClick = { pickingEnd = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("End: ${endDate.format(dateFmt)}")
+                }
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("Notes") },
-                    minLines = 4
+                    minLines = 3
                 )
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(name, notes) }) { Text("Save") }
+            Button(
+                onClick = {
+                    onSave(name, notes, startDate.toEpochDay(), endDate.toEpochDay())
+                },
+                enabled = !endDate.isBefore(startDate)
+            ) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+    if (pickingStart) {
+        JourneyDetailDatePicker(
+            initialDate = startDate,
+            onDismiss = { pickingStart = false },
+            onConfirm = {
+                startDate = it
+                if (endDate.isBefore(it)) endDate = it
+                pickingStart = false
+            }
+        )
+    }
+    if (pickingEnd) {
+        JourneyDetailDatePicker(
+            initialDate = endDate,
+            onDismiss = { pickingEnd = false },
+            onConfirm = {
+                endDate = it
+                pickingEnd = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun JourneyDetailDatePicker(
+    initialDate: LocalDate,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit
+) {
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialDate
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        onConfirm(
+                            Instant.ofEpochMilli(millis)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                        )
+                    } ?: onDismiss()
+                }
+            ) { Text("OK") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    ) {
+        DatePicker(state = pickerState)
+    }
 }
 
 @Composable

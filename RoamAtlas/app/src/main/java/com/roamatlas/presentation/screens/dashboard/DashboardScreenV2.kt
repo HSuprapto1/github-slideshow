@@ -91,6 +91,7 @@ fun DashboardScreenV2(
     onOpenToday: () -> Unit = {},
     onOpenJourneys: () -> Unit = {},
     onOpenJourney: (Long) -> Unit = {},
+    onOpenDays: () -> Unit = {},
     viewModel: DashboardViewModelV2 = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -175,7 +176,8 @@ fun DashboardScreenV2(
                     TravelOverviewSection(
                         stats = uiState.travelStats,
                         onOpenCountries = onOpenCountries,
-                        onOpenCities = onOpenCities
+                        onOpenCities = onOpenCities,
+                        onOpenDays = onOpenDays
                     )
                 }
                 
@@ -626,7 +628,8 @@ private fun FactLine(text: String) {
 private fun TravelOverviewSection(
     stats: TravelStatistics,
     onOpenCountries: () -> Unit,
-    onOpenCities: () -> Unit
+    onOpenCities: () -> Unit,
+    onOpenDays: () -> Unit
 ) {
     Column {
         Text(
@@ -662,7 +665,8 @@ private fun TravelOverviewSection(
                 icon = Icons.Default.Schedule,
                 value = stats.totalDaysTracked.toString(),
                 label = "Days",
-                color = MaterialTheme.colorScheme.tertiary
+                color = MaterialTheme.colorScheme.tertiary,
+                onClick = onOpenDays
             )
         }
         

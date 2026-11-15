@@ -4,12 +4,14 @@ import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Luggage
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Luggage
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.QueryStats
@@ -91,9 +93,16 @@ sealed class Screen(
     )
     
     data object AddFlight : Screen(
-        route = "add_flight",
+        route = "add_flight?journeyId={journeyId}&mode={mode}",
         title = "Add Flight"
-    )
+    ) {
+        const val BASE_ROUTE = "add_flight"
+        fun create(journeyId: Long? = null, mode: String? = null): String {
+            val j = journeyId?.toString().orEmpty()
+            val m = mode.orEmpty()
+            return "add_flight?journeyId=$j&mode=$m"
+        }
+    }
     
     data object ImportFlights : Screen(
         route = "import_flights",
@@ -112,7 +121,9 @@ sealed class Screen(
 
     data object Journeys : Screen(
         route = "journeys",
-        title = "Journeys"
+        title = "Journeys",
+        selectedIcon = Icons.Filled.Luggage,
+        unselectedIcon = Icons.Outlined.Luggage
     )
 
     data object JourneyDetail : Screen(
@@ -166,7 +177,7 @@ sealed class Screen(
 val bottomNavItems = listOf(
     Screen.Dashboard,
     Screen.Map,
+    Screen.Journeys,
     Screen.Photos,
-    Screen.Days,
     Screen.Settings
 )

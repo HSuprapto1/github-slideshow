@@ -117,12 +117,14 @@ fun AddFlightScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Transport", style = MaterialTheme.typography.titleMedium)
+            val isHotel = TransportMode.isHotel(uiState.transportMode)
+            Text("Type", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
                     TransportMode.FLIGHT,
                     TransportMode.TRAIN,
-                    TransportMode.BUS
+                    TransportMode.BUS,
+                    TransportMode.HOTEL
                 ).forEach { mode ->
                     FilterChip(
                         selected = uiState.transportMode == mode,
@@ -132,9 +134,8 @@ fun AddFlightScreen(
                 }
             }
 
-            // Departure Section
             SectionCard(
-                title = "Departure",
+                title = if (isHotel) "Check-in" else "Departure",
                 icon = Icons.Default.FlightTakeoff
             ) {
                 AirportInput(
@@ -155,7 +156,7 @@ fun AddFlightScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 DateTimeInput(
-                    label = "Departure",
+                    label = if (isHotel) "Check-in" else "Departure",
                     dateMillis = uiState.departureDateMillis,
                     onDateChange = viewModel::updateDepartureDate,
                     hour = uiState.departureHour,
@@ -164,30 +165,37 @@ fun AddFlightScreen(
                 )
             }
             
-            // Arrival Section
             SectionCard(
-                title = "Arrival",
+                title = if (isHotel) "Check-out" else "Arrival",
                 icon = Icons.Default.FlightLand
             ) {
-                AirportInput(
-                    searchQuery = uiState.arrivalAirportSearch,
-                    onSearchQueryChange = viewModel::searchArrivalAirport,
-                    suggestions = uiState.arrivalAirportSuggestions,
-                    onSelectAirport = viewModel::selectArrivalAirport,
-                    airportCode = uiState.arrivalAirportCode,
-                    onAirportCodeChange = viewModel::updateArrivalAirportCode,
-                    airportName = uiState.arrivalAirportName,
-                    onAirportNameChange = viewModel::updateArrivalAirportName,
-                    city = uiState.arrivalCity,
-                    onCityChange = viewModel::updateArrivalCity,
-                    countryCode = uiState.arrivalCountryCode,
-                    onCountryCodeChange = viewModel::updateArrivalCountryCode
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
+                if (!isHotel) {
+                    AirportInput(
+                        searchQuery = uiState.arrivalAirportSearch,
+                        onSearchQueryChange = viewModel::searchArrivalAirport,
+                        suggestions = uiState.arrivalAirportSuggestions,
+                        onSelectAirport = viewModel::selectArrivalAirport,
+                        airportCode = uiState.arrivalAirportCode,
+                        onAirportCodeChange = viewModel::updateArrivalAirportCode,
+                        airportName = uiState.arrivalAirportName,
+                        onAirportNameChange = viewModel::updateArrivalAirportName,
+                        city = uiState.arrivalCity,
+                        onCityChange = viewModel::updateArrivalCity,
+                        countryCode = uiState.arrivalCountryCode,
+                        onCountryCodeChange = viewModel::updateArrivalCountryCode
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                } else {
+                    Text(
+                        "Uses the same city as check-in. Set check-out date and time below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 
                 DateTimeInput(
-                    label = "Arrival",
+                    label = if (isHotel) "Check-out" else "Arrival",
                     dateMillis = uiState.arrivalDateMillis,
                     onDateChange = viewModel::updateArrivalDate,
                     hour = uiState.arrivalHour,
@@ -196,9 +204,8 @@ fun AddFlightScreen(
                 )
             }
             
-            // Flight Details Section
             SectionCard(
-                title = "Flight Details",
+                title = if (isHotel) "Hotel details" else "Trip details",
                 icon = Icons.Default.Schedule
             ) {
                 Row(
@@ -213,6 +220,7 @@ fun AddFlightScreen(
                                 when (uiState.transportMode) {
                                     TransportMode.TRAIN -> "Operator"
                                     TransportMode.BUS -> "Operator"
+                                    TransportMode.HOTEL -> "Hotel name"
                                     else -> "Airline"
                                 }
                             )
@@ -222,6 +230,7 @@ fun AddFlightScreen(
                                 when (uiState.transportMode) {
                                     TransportMode.TRAIN -> "e.g. Deutsche Bahn"
                                     TransportMode.BUS -> "e.g. FlixBus"
+                                    TransportMode.HOTEL -> "e.g. Park Hyatt Tokyo"
                                     else -> "e.g. Singapore Airlines"
                                 }
                             )
@@ -229,68 +238,73 @@ fun AddFlightScreen(
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
-                        value = uiState.flightNumber,
-                        onValueChange = viewModel::updateFlightNumber,
-                        label = {
-                            Text(
-                                when (uiState.transportMode) {
-                                    TransportMode.TRAIN -> "Train #"
-                                    TransportMode.BUS -> "Bus #"
-                                    else -> "Flight #"
-                                }
+                    if (!isHotel) {
+                        OutlinedTextField(
+                            value = uiState.flightNumber,
+                            onValueChange = viewModel::updateFlightNumber,
+                            label = {
+                                Text(
+                                    when (uiState.transportMode) {
+                                        TransportMode.TRAIN -> "Train #"
+                                        TransportMode.BUS -> "Bus #"
+                                        else -> "Flight #"
+                                    }
+                                )
+                            },
+                            placeholder = {
+                                Text(
+                                    when (uiState.transportMode) {
+                                        TransportMode.TRAIN -> "ICE 123"
+                                        TransportMode.BUS -> "FX 456"
+                                        else -> "SQ123"
+                                    }
+                                )
+                            },
+                            modifier = Modifier.weight(0.6f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Characters
                             )
-                        },
-                        placeholder = {
-                            Text(
-                                when (uiState.transportMode) {
-                                    TransportMode.TRAIN -> "ICE 123"
-                                    TransportMode.BUS -> "FX 456"
-                                    else -> "SQ123"
-                                }
-                            )
-                        },
-                        modifier = Modifier.weight(0.6f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Characters
                         )
-                    )
+                    }
                 }
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = uiState.aircraftType,
-                        onValueChange = viewModel::updateAircraftType,
-                        label = { Text("Aircraft (optional)") },
-                        placeholder = { Text("Add later if known") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = uiState.seatNumber,
-                        onValueChange = viewModel::updateSeatNumber,
-                        label = { Text("Seat (optional)") },
-                        placeholder = { Text("After check-in") },
-                        modifier = Modifier.weight(0.5f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Characters
+                if (!isHotel) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = uiState.aircraftType,
+                            onValueChange = viewModel::updateAircraftType,
+                            label = { Text("Aircraft (optional)") },
+                            placeholder = { Text("Add later if known") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
                         )
-                    )
+                        OutlinedTextField(
+                            value = uiState.seatNumber,
+                            onValueChange = viewModel::updateSeatNumber,
+                            label = { Text("Seat (optional)") },
+                            placeholder = { Text("After check-in") },
+                            modifier = Modifier.weight(0.5f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Characters
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-                
-                Spacer(modifier = Modifier.height(8.dp))
                 
                 OutlinedTextField(
                     value = uiState.bookingReference,
                     onValueChange = viewModel::updateBookingReference,
-                    label = { Text("Booking Reference") },
+                    label = {
+                        Text(if (isHotel) "Booking reference (optional)" else "Booking Reference")
+                    },
                     placeholder = { Text("ABC123") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -298,11 +312,13 @@ fun AddFlightScreen(
                         capitalization = KeyboardCapitalization.Characters
                     )
                 )
-                Text(
-                    "Aircraft and seat can be left empty and updated after online or airport check-in.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (!isHotel) {
+                    Text(
+                        "Aircraft and seat can be left empty and updated after online or airport check-in.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             
             // Notes Section

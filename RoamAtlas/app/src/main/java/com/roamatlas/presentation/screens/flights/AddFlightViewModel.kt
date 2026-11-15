@@ -1,9 +1,11 @@
 package com.roamatlas.presentation.screens.flights
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.airport.AirportRepository
+import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.TransportMode
@@ -20,6 +22,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 data class AddFlightUiState(
+    val journeyId: Long? = null,
     val transportMode: String = TransportMode.FLIGHT,
     // Departure
     val departureAirportCode: String = "",
@@ -61,10 +64,16 @@ data class AddFlightUiState(
 ) {
     val isValid: Boolean
         get() {
-            val codeOk = if (TransportMode.isFlight(transportMode)) {
-                departureAirportCode.length == 3 && arrivalAirportCode.length == 3
-            } else {
-                departureAirportCode.length >= 2 && arrivalAirportCode.length >= 2
+            val effectiveArrival = arrivalAirportCode.ifBlank {
+                if (TransportMode.isHotel(transportMode)) departureAirportCode else ""
+            }
+            val codeOk = when {
+                TransportMode.isHotel(transportMode) ->
+                    departureAirportCode.length >= 2 && effectiveArrival.length >= 2
+                TransportMode.isFlight(transportMode) ->
+                    departureAirportCode.length == 3 && effectiveArrival.length == 3
+                else ->
+                    departureAirportCode.length >= 2 && effectiveArrival.length >= 2
             }
             return codeOk && departureDateMillis != null && arrivalDateMillis != null
         }
@@ -72,18 +81,52 @@ data class AddFlightUiState(
 
 @HiltViewModel
 class AddFlightViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
     private val flightDao: FlightDao,
-    private val airportRepository: AirportRepository
+    private val airportRepository: AirportRepository,
+    private val journeyRepository: JourneyRepository
 ) : ViewModel() {
-    
-    private val _uiState = MutableStateFlow(AddFlightUiState())
+
+    private val initialJourneyId =
+        savedStateHandle.get<String>("journeyId")?.toLongOrNull()
+    private val initialMode = savedStateHandle.get<String>("mode")
+        ?.takeIf { it.isNotBlank() }
+        ?: TransportMode.FLIGHT
+
+    private val _uiState = MutableStateFlow(
+        AddFlightUiState(
+            journeyId = initialJourneyId,
+            transportMode = when (initialMode.uppercase()) {
+                TransportMode.TRAIN -> TransportMode.TRAIN
+                TransportMode.BUS -> TransportMode.BUS
+                TransportMode.HOTEL -> TransportMode.HOTEL
+                else -> TransportMode.FLIGHT
+            }
+        )
+    )
     val uiState: StateFlow<AddFlightUiState> = _uiState.asStateFlow()
     
     private var selectedDepartureAirport: Airport? = null
     private var selectedArrivalAirport: Airport? = null
 
     fun setTransportMode(mode: String) {
-        _uiState.update { it.copy(transportMode = mode) }
+        _uiState.update { current ->
+            val next = current.copy(transportMode = mode)
+            if (TransportMode.isHotel(mode) &&
+                current.arrivalAirportCode.isBlank() &&
+                current.departureAirportCode.isNotBlank()
+            ) {
+                next.copy(
+                    arrivalAirportCode = current.departureAirportCode,
+                    arrivalAirportName = current.departureAirportName,
+                    arrivalCity = current.departureCity,
+                    arrivalCountryCode = current.departureCountryCode,
+                    arrivalAirportSearch = current.departureAirportSearch
+                )
+            } else {
+                next
+            }
+        }
     }
 
     fun searchDepartureAirport(query: String) {
@@ -298,24 +341,40 @@ class AddFlightViewModel @Inject constructor(
                 
                 val durationMinutes = ((arrivalTime - departureTime) / 60000).toInt()
                 
+                val isHotel = TransportMode.isHotel(state.transportMode)
+                val arrivalCode = state.arrivalAirportCode.ifBlank {
+                    if (isHotel) state.departureAirportCode else ""
+                }
+                if (arrivalCode.isBlank()) {
+                    _uiState.update {
+                        it.copy(isSaving = false, error = "Please fill in all required fields")
+                    }
+                    return@launch
+                }
                 val flight = FlightEntity(
                     id = 0, // Auto-generated
                     departureAirportCode = state.departureAirportCode.uppercase(),
                     departureAirportName = state.departureAirportName.ifBlank { null },
                     departureCity = state.departureCity.ifBlank { null },
                     departureCountryCode = state.departureCountryCode.ifBlank { null },
-                    arrivalAirportCode = state.arrivalAirportCode.uppercase(),
-                    arrivalAirportName = state.arrivalAirportName.ifBlank { null },
-                    arrivalCity = state.arrivalCity.ifBlank { null },
-                    arrivalCountryCode = state.arrivalCountryCode.ifBlank { null },
+                    arrivalAirportCode = arrivalCode.uppercase(),
+                    arrivalAirportName = state.arrivalAirportName.ifBlank {
+                        if (isHotel) state.departureAirportName.ifBlank { null } else null
+                    },
+                    arrivalCity = state.arrivalCity.ifBlank {
+                        if (isHotel) state.departureCity.ifBlank { null } else null
+                    },
+                    arrivalCountryCode = state.arrivalCountryCode.ifBlank {
+                        if (isHotel) state.departureCountryCode.ifBlank { null } else null
+                    },
                     departureTimeMillis = departureTime,
                     arrivalTimeMillis = arrivalTime,
                     flightNumber = state.flightNumber.ifBlank { null },
                     airline = state.airline.ifBlank { null },
-                    aircraftType = state.aircraftType.ifBlank { null },
-                    distanceKm = state.calculatedDistanceKm,
+                    aircraftType = if (isHotel) null else state.aircraftType.ifBlank { null },
+                    distanceKm = if (isHotel) null else state.calculatedDistanceKm,
                     durationMinutes = if (durationMinutes > 0) durationMinutes else null,
-                    seatNumber = state.seatNumber.ifBlank { null },
+                    seatNumber = if (isHotel) null else state.seatNumber.ifBlank { null },
                     bookingReference = state.bookingReference.ifBlank { null },
                     notes = state.notes.ifBlank { null },
                     photoUri = null,
@@ -324,8 +383,11 @@ class AddFlightViewModel @Inject constructor(
                     updatedAtMillis = System.currentTimeMillis(),
                     transportMode = state.transportMode
                 )
-                
-                flightDao.insert(flight)
+
+                val insertedId = flightDao.insert(flight)
+                state.journeyId?.let { journeyId ->
+                    journeyRepository.attachFlightToJourney(journeyId, insertedId)
+                }
                 _uiState.update { it.copy(isSaving = false, flightSaved = true) }
                 
             } catch (e: Exception) {

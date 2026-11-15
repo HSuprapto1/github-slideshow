@@ -17,10 +17,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
@@ -63,7 +65,8 @@ fun RoamAtlasApp(
                     bottomNavItems.forEach { screen ->
                         val selected = currentDestination?.hierarchy?.any {
                             it.route == screen.route ||
-                                (screen == Screen.Map && it.route?.startsWith("map/") == true)
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true) ||
+                                (screen == Screen.Journeys && it.route?.startsWith("journey") == true)
                         } == true
                         NavigationBarItem(
                             icon = {
@@ -99,7 +102,8 @@ fun RoamAtlasApp(
                     bottomNavItems.forEach { screen ->
                         val selected = currentDestination?.hierarchy?.any {
                             it.route == screen.route ||
-                                (screen == Screen.Map && it.route?.startsWith("map/") == true)
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true) ||
+                                (screen == Screen.Journeys && it.route?.startsWith("journey") == true)
                         } == true
                         NavigationRailItem(
                             icon = {
@@ -153,20 +157,32 @@ fun RoamAtlasApp(
                         },
                         onOpenJourney = { journeyId ->
                             navController.navigate(Screen.JourneyDetail.forId(journeyId))
+                        },
+                        onOpenDays = {
+                            navController.navigate(Screen.Days.route)
                         }
                     )
                 }
                 composable(Screen.Map.route) {
-                    MapScreenV2()
+                    MapScreenV2(
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
                 }
                 composable(Screen.Map.DAY_ROUTE) { entry ->
                     val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
-                    MapScreenV2(initialDate = date)
+                    MapScreenV2(
+                        initialDate = date,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
                 }
                 composable(Screen.Map.DAY_COUNTRY_ROUTE) { entry ->
                     val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
                     val country = entry.arguments?.getString("country")
-                    MapScreenV2(initialDate = date, initialCountryCode = country)
+                    MapScreenV2(
+                        initialDate = date,
+                        initialCountryCode = country,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
                 }
                 composable(Screen.Map.DAY_CITY_ROUTE) { entry ->
                     val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
@@ -175,12 +191,16 @@ fun RoamAtlasApp(
                     MapScreenV2(
                         initialDate = date,
                         initialCountryCode = country,
-                        initialCity = city
+                        initialCity = city,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
                     )
                 }
                 composable(Screen.Map.PHOTO_ROUTE) { entry ->
                     val locationId = entry.arguments?.getString("locationId")?.toLongOrNull()
-                    MapScreenV2(initialLocationId = locationId)
+                    MapScreenV2(
+                        initialLocationId = locationId,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
                 }
                 composable(Screen.Days.route) {
                     DayAuditScreen(
@@ -270,11 +290,23 @@ fun RoamAtlasApp(
                             navController.popBackStack()
                         },
                         onNavigateToAddFlight = {
-                            navController.navigate(Screen.AddFlight.route)
+                            navController.navigate(Screen.AddFlight.create())
                         }
                     )
                 }
-                composable(Screen.AddFlight.route) {
+                composable(
+                    route = Screen.AddFlight.route,
+                    arguments = listOf(
+                        navArgument("journeyId") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        },
+                        navArgument("mode") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
+                    )
+                ) {
                     AddFlightScreen(
                         onNavigateBack = {
                             navController.popBackStack()
@@ -293,7 +325,6 @@ fun RoamAtlasApp(
                 }
                 composable(Screen.Journeys.route) {
                     JourneysScreen(
-                        onNavigateBack = { navController.popBackStack() },
                         onOpenJourney = { journeyId ->
                             navController.navigate(Screen.JourneyDetail.forId(journeyId))
                         }
@@ -310,6 +341,9 @@ fun RoamAtlasApp(
                             } else {
                                 navController.navigate(Screen.Map.forDate(date.toString()))
                             }
+                        },
+                        onAddToJourney = { journeyId, mode ->
+                            navController.navigate(Screen.AddFlight.create(journeyId, mode))
                         }
                     )
                 }

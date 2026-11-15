@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import javax.inject.Inject
 
 enum class JourneyListTab {
@@ -31,6 +32,7 @@ data class JourneysUiState(
     val suggestedGroups: List<List<FlightEntity>> = emptyList(),
     val showCreateDialog: Boolean = false,
     val selectedFlightIds: Set<Long> = emptySet(),
+    val createdJourneyId: Long? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null
 )
@@ -52,10 +54,15 @@ class JourneysViewModel @Inject constructor(
             }.collect { (journeys, unassigned) ->
                 val upcoming = journeys
                     .filterNot { it.isPast }
-                    .sortedBy { it.firstDepartureMillis ?: Long.MAX_VALUE }
+                    .sortedBy {
+                        it.journey.startDateEpochDay
+                    }
                 val past = journeys
                     .filter { it.isPast }
-                    .sortedByDescending { it.firstDepartureMillis ?: 0L }
+                    .sortedByDescending {
+                        it.journey.endDateEpochDay
+                            ?: it.journey.startDateEpochDay
+                    }
                 val preferredTab = when {
                     upcoming.isNotEmpty() -> JourneyListTab.UPCOMING
                     past.isNotEmpty() -> JourneyListTab.PAST
@@ -157,27 +164,47 @@ class JourneysViewModel @Inject constructor(
         )
     }
 
-    fun createJourney(name: String, notes: String) {
-        val selected = _uiState.value.unassignedFlights.filter {
-            it.id in _uiState.value.selectedFlightIds
+    fun createJourney(
+        name: String,
+        notes: String,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ) {
+        if (name.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Enter a journey name.")
+            return
         }
-        if (selected.isEmpty()) {
+        if (endDate.isBefore(startDate)) {
             _uiState.value = _uiState.value.copy(
-                errorMessage = "Select at least one flight."
+                errorMessage = "End date must be on or after start date."
             )
             return
         }
+        val selected = _uiState.value.unassignedFlights.filter {
+            it.id in _uiState.value.selectedFlightIds
+        }
         viewModelScope.launch {
             runCatching {
-                journeyRepository.createJourney(name, notes, selected)
-            }.onSuccess {
+                journeyRepository.createJourney(
+                    name = name,
+                    notes = notes,
+                    flights = selected,
+                    startDateEpochDay = startDate.toEpochDay(),
+                    endDateEpochDay = endDate.toEpochDay()
+                )
+            }.onSuccess { journeyId ->
                 hideCreateDialog()
+                _uiState.value = _uiState.value.copy(createdJourneyId = journeyId)
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     errorMessage = error.message ?: "Could not create journey."
                 )
             }
         }
+    }
+
+    fun consumeCreatedJourneyId() {
+        _uiState.value = _uiState.value.copy(createdJourneyId = null)
     }
 
     private fun computeVisible(

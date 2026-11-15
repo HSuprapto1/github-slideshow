@@ -45,7 +45,7 @@ data class FlightEntity(
     val flightStatus: String? = null,
     val separateTicketFromPrevious: Boolean? = null,
     val minimumConnectionMinutes: Int? = null,
-    /** FLIGHT, TRAIN, or BUS — stations reuse airport code fields. */
+    /** FLIGHT, TRAIN, BUS, or HOTEL — stations/cities reuse airport code fields. */
     val transportMode: String = TransportMode.FLIGHT
 )
 
@@ -53,15 +53,22 @@ object TransportMode {
     const val FLIGHT = "FLIGHT"
     const val TRAIN = "TRAIN"
     const val BUS = "BUS"
+    const val HOTEL = "HOTEL"
 
     fun label(mode: String?): String = when (mode?.uppercase()) {
         TRAIN -> "Train"
         BUS -> "Bus"
+        HOTEL -> "Hotel"
         else -> "Flight"
     }
 
     fun isFlight(mode: String?): Boolean =
         mode.isNullOrBlank() || mode.equals(FLIGHT, ignoreCase = true)
+
+    fun isHotel(mode: String?): Boolean =
+        mode.equals(HOTEL, ignoreCase = true)
+
+    fun isStay(mode: String?): Boolean = isHotel(mode)
 }
 
 @Entity(tableName = "trips")

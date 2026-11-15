@@ -6,13 +6,16 @@ import android.net.Uri
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TripEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -66,14 +69,58 @@ data class JourneyWithFlights(
     val photoUris: List<String>
         get() = decodePhotoUris(journey.photoUrisJson)
 
+    val journeyDayCount: Int
+        get() {
+            val start = journey.startDateEpochDay
+            val end = journey.endDateEpochDay ?: start
+            return (end - start + 1).toInt().coerceAtLeast(1)
+        }
+
+    val flightCount: Int
+        get() = flights.count { TransportMode.isFlight(it.transportMode) }
+
+    val groundTransportCount: Int
+        get() = flights.count {
+            it.transportMode.equals(TransportMode.TRAIN, ignoreCase = true) ||
+                it.transportMode.equals(TransportMode.BUS, ignoreCase = true)
+        }
+
+    val hotelCount: Int
+        get() = flights.count { TransportMode.isHotel(it.transportMode) }
+
+    val legSummaryText: String
+        get() = buildList {
+            if (flightCount > 0) add("$flightCount flight${if (flightCount == 1) "" else "s"}")
+            if (groundTransportCount > 0) {
+                add("$groundTransportCount train${if (groundTransportCount == 1) "" else "s"}/bus${if (groundTransportCount == 1) "" else "es"}")
+            }
+            if (hotelCount > 0) add("$hotelCount hotel${if (hotelCount == 1) "" else "s"}")
+            add("$journeyDayCount day${if (journeyDayCount == 1) "" else "s"}")
+        }.joinToString(" · ").ifBlank { "$journeyDayCount days" }
+
     val isPast: Boolean
         get() {
+            val zone = ZoneId.systemDefault()
+            val endDay = journey.endDateEpochDay
+            if (endDay != null) {
+                val endMillis = LocalDate.ofEpochDay(endDay)
+                    .plusDays(1)
+                    .atStartOfDay(zone)
+                    .toInstant()
+                    .toEpochMilli()
+                return endMillis <= System.currentTimeMillis()
+            }
             val end = finalArrivalMillis ?: firstDepartureMillis ?: return false
             return end < System.currentTimeMillis()
         }
 
     val connections: List<JourneyConnection>
-        get() = orderedFlights.zipWithNext().map { (arriving, departing) ->
+        get() = orderedFlights.zipWithNext().mapNotNull { (arriving, departing) ->
+            if (TransportMode.isStay(arriving.transportMode) ||
+                TransportMode.isStay(departing.transportMode)
+            ) {
+                return@mapNotNull null
+            }
             val scheduled = (departing.departureTimeMillis - arriving.arrivalTimeMillis) / 60_000
             val effectiveArrival = arriving.estimatedArrivalTimeMillis ?: arriving.arrivalTimeMillis
             val effectiveDeparture =
@@ -129,24 +176,37 @@ class JourneyRepository @Inject constructor(
     suspend fun createJourney(
         name: String,
         notes: String,
-        flights: List<FlightEntity>
+        flights: List<FlightEntity>,
+        startDateEpochDay: Long? = null,
+        endDateEpochDay: Long? = null
     ): Long {
-        require(flights.isNotEmpty()) { "Choose at least one flight." }
         val ordered = flights.sortedBy { it.departureTimeMillis }
         val now = System.currentTimeMillis()
-        val firstDate = Instant.ofEpochMilli(ordered.first().departureTimeMillis)
-            .atZone(ZoneId.systemDefault()).toLocalDate()
-        val lastDate = Instant.ofEpochMilli(ordered.last().arrivalTimeMillis)
-            .atZone(ZoneId.systemDefault()).toLocalDate()
+        val zone = ZoneId.systemDefault()
+        val firstDate = startDateEpochDay?.let(LocalDate::ofEpochDay)
+            ?: ordered.firstOrNull()?.let {
+                Instant.ofEpochMilli(it.departureTimeMillis).atZone(zone).toLocalDate()
+            }
+            ?: LocalDate.now(zone)
+        val lastDate = endDateEpochDay?.let(LocalDate::ofEpochDay)
+            ?: ordered.lastOrNull()?.let {
+                Instant.ofEpochMilli(it.arrivalTimeMillis).atZone(zone).toLocalDate()
+            }
+            ?: firstDate
+        require(!lastDate.isBefore(firstDate)) { "End date must be on or after start date." }
         val journeyId = tripDao.insert(
             TripEntity(
                 name = name.ifBlank {
-                    "${ordered.first().departureAirportCode} to ${ordered.last().arrivalAirportCode}"
+                    if (ordered.isNotEmpty()) {
+                        "${ordered.first().departureAirportCode} to ${ordered.last().arrivalAirportCode}"
+                    } else {
+                        "New journey"
+                    }
                 },
                 startDateEpochDay = firstDate.toEpochDay(),
                 endDateEpochDay = lastDate.toEpochDay(),
-                destinationCountryCode = ordered.last().arrivalCountryCode,
-                destinationCity = ordered.last().arrivalCity,
+                destinationCountryCode = ordered.lastOrNull()?.arrivalCountryCode,
+                destinationCity = ordered.lastOrNull()?.arrivalCity,
                 notes = notes.ifBlank { null },
                 coverPhotoUri = null,
                 photoUrisJson = null,
@@ -166,15 +226,72 @@ class JourneyRepository @Inject constructor(
         return journeyId
     }
 
-    suspend fun updateJourney(journeyId: Long, name: String, notes: String) {
+    suspend fun createEmptyJourney(
+        name: String,
+        notes: String,
+        startDateEpochDay: Long,
+        endDateEpochDay: Long
+    ): Long = createJourney(
+        name = name,
+        notes = notes,
+        flights = emptyList(),
+        startDateEpochDay = startDateEpochDay,
+        endDateEpochDay = endDateEpochDay
+    )
+
+    suspend fun updateJourney(
+        journeyId: Long,
+        name: String,
+        notes: String,
+        startDateEpochDay: Long? = null,
+        endDateEpochDay: Long? = null
+    ) {
         val journey = tripDao.getById(journeyId) ?: return
+        val start = startDateEpochDay ?: journey.startDateEpochDay
+        val end = endDateEpochDay ?: journey.endDateEpochDay ?: start
+        require(end >= start) { "End date must be on or after start date." }
         tripDao.update(
             journey.copy(
                 name = name.ifBlank { journey.name },
                 notes = notes.ifBlank { null },
+                startDateEpochDay = start,
+                endDateEpochDay = end,
                 updatedAtMillis = System.currentTimeMillis()
             )
         )
+    }
+
+    suspend fun attachFlightToJourney(journeyId: Long, flightId: Long): Boolean {
+        val journey = tripDao.getById(journeyId) ?: return false
+        val flight = flightDao.getFlightById(flightId) ?: return false
+        val existing = flightDao.getFlightsForJourney(journeyId).first()
+        val nextSequence = (existing.maxOfOrNull { it.journeySequence ?: -1 } ?: -1) + 1
+        val now = System.currentTimeMillis()
+        flightDao.update(
+            flight.copy(
+                journeyId = journeyId,
+                journeySequence = nextSequence,
+                updatedAtMillis = now
+            )
+        )
+        // Expand trip dates if the new leg falls outside the shell.
+        val zone = ZoneId.systemDefault()
+        val depDay = Instant.ofEpochMilli(flight.departureTimeMillis)
+            .atZone(zone).toLocalDate().toEpochDay()
+        val arrDay = Instant.ofEpochMilli(flight.arrivalTimeMillis)
+            .atZone(zone).toLocalDate().toEpochDay()
+        val start = minOf(journey.startDateEpochDay, depDay)
+        val end = maxOf(journey.endDateEpochDay ?: journey.startDateEpochDay, arrDay)
+        if (start != journey.startDateEpochDay || end != journey.endDateEpochDay) {
+            tripDao.update(
+                journey.copy(
+                    startDateEpochDay = start,
+                    endDateEpochDay = end,
+                    updatedAtMillis = now
+                )
+            )
+        }
+        return true
     }
 
     suspend fun addJourneyPhoto(journeyId: Long, uri: Uri): Boolean {

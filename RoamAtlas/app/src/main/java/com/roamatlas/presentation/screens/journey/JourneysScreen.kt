@@ -24,6 +24,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -41,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +62,9 @@ import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
 import java.text.SimpleDateFormat
 import java.time.Instant
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
@@ -65,40 +72,48 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JourneysScreen(
-    onNavigateBack: () -> Unit,
     onOpenJourney: (Long) -> Unit,
     viewModel: JourneysViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
     var journeyName by remember { mutableStateOf("") }
     var journeyNotes by remember { mutableStateOf("") }
+    var startDate by remember { mutableStateOf(LocalDate.now()) }
+    var endDate by remember { mutableStateOf(LocalDate.now().plusDays(7)) }
+    var pickingStart by remember { mutableStateOf(false) }
+    var pickingEnd by remember { mutableStateOf(false) }
     val visibleJourneys = state.visibleJourneys
+    val dateLabel = remember {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    }
+
+    LaunchedEffect(state.createdJourneyId) {
+        state.createdJourneyId?.let { id ->
+            viewModel.consumeCreatedJourneyId()
+            onOpenJourney(id)
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Journeys") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
             )
         },
         floatingActionButton = {
-            if (state.unassignedFlights.isNotEmpty()) {
-                FloatingActionButton(
-                    onClick = {
-                        journeyName = ""
-                        journeyNotes = ""
-                        viewModel.showCreateDialog()
-                    }
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Create journey")
+            FloatingActionButton(
+                onClick = {
+                    journeyName = ""
+                    journeyNotes = ""
+                    startDate = LocalDate.now()
+                    endDate = LocalDate.now().plusDays(7)
+                    viewModel.showCreateDialog()
                 }
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Create journey")
             }
         }
     ) { padding ->
@@ -200,7 +215,7 @@ fun JourneysScreen(
                                 state.searchQuery.isNotBlank() || state.destinationFilter != null ->
                                     "No journeys match your search or destination filter."
                                 state.selectedTab == JourneyListTab.UPCOMING ->
-                                    "No upcoming journeys. Create one from connected flights, or check Past."
+                                    "No upcoming journeys. Tap + to create a trip shell, then add flights, trains, buses, or hotels."
                                 else ->
                                     "No past journeys yet. Completed trips will appear here."
                             },
@@ -247,6 +262,10 @@ fun JourneysScreen(
                     modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    Text(
+                        "Create the trip shell first. You can add flights, trains, buses, and hotels inside the journey.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     OutlinedTextField(
                         value = journeyName,
                         onValueChange = { journeyName = it },
@@ -255,36 +274,44 @@ fun JourneysScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
+                    TextButton(onClick = { pickingStart = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Start: ${startDate.format(dateLabel)}")
+                    }
+                    TextButton(onClick = { pickingEnd = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("End: ${endDate.format(dateLabel)}")
+                    }
                     OutlinedTextField(
                         value = journeyNotes,
                         onValueChange = { journeyNotes = it },
-                        label = { Text("Notes") },
+                        label = { Text("Notes (optional)") },
                         modifier = Modifier.fillMaxWidth(),
-                        minLines = 3
+                        minLines = 2
                     )
-                    Text("Select flights", fontWeight = FontWeight.Bold)
-                    state.unassignedFlights.forEach { flight ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleFlight(flight.id) }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = flight.id in state.selectedFlightIds,
-                                onCheckedChange = { viewModel.toggleFlight(flight.id) }
-                            )
-                            Column {
-                                Text(
-                                    "${flight.departureAirportCode} → ${flight.arrivalAirportCode}",
-                                    fontWeight = FontWeight.SemiBold
+                    if (state.unassignedFlights.isNotEmpty()) {
+                        Text("Optional: attach unassigned legs now", fontWeight = FontWeight.Bold)
+                        state.unassignedFlights.forEach { flight ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.toggleFlight(flight.id) }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = flight.id in state.selectedFlightIds,
+                                    onCheckedChange = { viewModel.toggleFlight(flight.id) }
                                 )
-                                Text(
-                                    listOfNotNull(flight.flightNumber, formatFlightDate(flight.departureTimeMillis))
-                                        .joinToString(" · "),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                Column {
+                                    Text(
+                                        "${flight.departureAirportCode} → ${flight.arrivalAirportCode}",
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        listOfNotNull(flight.flightNumber, formatFlightDate(flight.departureTimeMillis))
+                                            .joinToString(" · "),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
                     }
@@ -292,8 +319,10 @@ fun JourneysScreen(
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.createJourney(journeyName, journeyNotes) },
-                    enabled = state.selectedFlightIds.isNotEmpty()
+                    onClick = {
+                        viewModel.createJourney(journeyName, journeyNotes, startDate, endDate)
+                    },
+                    enabled = journeyName.isNotBlank()
                 ) {
                     Text("Create")
                 }
@@ -304,6 +333,64 @@ fun JourneysScreen(
                 }
             }
         )
+    }
+
+    if (pickingStart) {
+        JourneyDatePickerDialog(
+            initialDate = startDate,
+            onDismiss = { pickingStart = false },
+            onConfirm = { picked ->
+                startDate = picked
+                if (endDate.isBefore(picked)) endDate = picked
+                pickingStart = false
+            }
+        )
+    }
+    if (pickingEnd) {
+        JourneyDatePickerDialog(
+            initialDate = endDate,
+            onDismiss = { pickingEnd = false },
+            onConfirm = { picked ->
+                endDate = picked
+                pickingEnd = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun JourneyDatePickerDialog(
+    initialDate: LocalDate,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit
+) {
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialDate
+            .atStartOfDay(java.time.ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        onConfirm(
+                            Instant.ofEpochMilli(millis)
+                                .atZone(java.time.ZoneOffset.UTC)
+                                .toLocalDate()
+                        )
+                    } ?: onDismiss()
+                }
+            ) { Text("OK") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    ) {
+        DatePicker(state = pickerState)
     }
 }
 
@@ -367,17 +454,14 @@ private fun JourneyCard(
                     JourneyRouteRiskStrip(journey)
                 }
                 Text(
-                    "${journey.flights.size} flights · ${formatDuration(journey.totalJourneyMinutes)} total · " +
-                        "${formatDuration(journey.totalTransitMinutes)} transit",
+                    journey.legSummaryText,
                     style = MaterialTheme.typography.bodySmall
                 )
-                journey.firstDepartureMillis?.let {
-                    Text(
-                        formatFlightDate(it),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    formatJourneyDateRange(journey),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Icon(Icons.Default.ChevronRight, contentDescription = "Open journey")
         }
@@ -385,11 +469,17 @@ private fun JourneyCard(
 }
 
 private fun journeyYear(journey: JourneyWithFlights): String {
-    val millis = journey.firstDepartureMillis ?: return "Unknown"
-    return Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .year
-        .toString()
+    val day = journey.journey.endDateEpochDay
+        ?: journey.journey.startDateEpochDay
+    return LocalDate.ofEpochDay(day).year.toString()
+}
+
+private fun formatJourneyDateRange(journey: JourneyWithFlights): String {
+    val fmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    val start = LocalDate.ofEpochDay(journey.journey.startDateEpochDay).format(fmt)
+    val endDay = journey.journey.endDateEpochDay ?: journey.journey.startDateEpochDay
+    val end = LocalDate.ofEpochDay(endDay).format(fmt)
+    return if (start == end) start else "$start – $end"
 }
 
 private fun formatFlightDate(millis: Long): String =

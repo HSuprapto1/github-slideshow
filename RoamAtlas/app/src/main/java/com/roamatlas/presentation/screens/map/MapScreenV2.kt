@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GpsFixed
@@ -87,6 +88,7 @@ fun MapScreenV2(
     initialCountryCode: String? = null,
     initialCity: String? = null,
     initialLocationId: Long? = null,
+    onOpenDays: () -> Unit = {},
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -161,6 +163,12 @@ fun MapScreenV2(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenDays) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = "Day audit"
+                        )
+                    }
                     IconButton(onClick = { viewModel.toggleFilters() }) {
                         Icon(
                             imageVector = Icons.Default.FilterList,

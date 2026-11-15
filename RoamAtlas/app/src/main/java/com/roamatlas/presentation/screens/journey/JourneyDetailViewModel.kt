@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -114,9 +113,26 @@ class JourneyDetailViewModel @Inject constructor(
         }
     }
 
-    fun updateJourney(name: String, notes: String) {
+    fun updateJourney(
+        name: String,
+        notes: String,
+        startDateEpochDay: Long,
+        endDateEpochDay: Long
+    ) {
         viewModelScope.launch {
-            journeyRepository.updateJourney(journeyId, name, notes)
+            runCatching {
+                journeyRepository.updateJourney(
+                    journeyId = journeyId,
+                    name = name,
+                    notes = notes,
+                    startDateEpochDay = startDateEpochDay,
+                    endDateEpochDay = endDateEpochDay
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = error.message ?: "Could not update journey dates."
+                )
+            }
         }
     }
 
@@ -199,17 +215,15 @@ class JourneyDetailViewModel @Inject constructor(
         timelineJob?.cancel()
         timelineJob = viewModelScope.launch {
             val zone = ZoneId.systemDefault()
-            val startMillis = journey.firstDepartureMillis
-                ?: journey.journey.startDateEpochDay.let {
-                    LocalDate.ofEpochDay(it).atStartOfDay(zone).toInstant().toEpochMilli()
-                }
-            val endExclusive = journey.finalArrivalMillis?.let { end ->
-                // Include the arrival day fully.
-                Instant.ofEpochMilli(end).atZone(zone).toLocalDate()
-                    .plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            } ?: journey.journey.endDateEpochDay?.let {
+            // Prefer editable journey date range so early arrivals / late departures stay in scope.
+            val startMillis = LocalDate.ofEpochDay(journey.journey.startDateEpochDay)
+                .atStartOfDay(zone)
+                .toInstant()
+                .toEpochMilli()
+            val endExclusive = (journey.journey.endDateEpochDay
+                ?: journey.journey.startDateEpochDay).let {
                 LocalDate.ofEpochDay(it).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            } ?: (startMillis + 24L * 60 * 60 * 1000)
+            }
 
             val sampleEvery = 1
             val gps = runCatching {
