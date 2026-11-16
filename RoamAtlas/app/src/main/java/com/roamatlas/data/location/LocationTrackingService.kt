@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import com.roamatlas.MainActivity
 import com.roamatlas.R
 import com.roamatlas.data.geo.OfflineGeoResolver
+import com.roamatlas.data.journey.JourneyTravelDetector
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -37,6 +38,9 @@ class LocationTrackingService : Service() {
 
     @Inject
     lateinit var geoResolver: OfflineGeoResolver
+
+    @Inject
+    lateinit var journeyTravelDetector: JourneyTravelDetector
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
@@ -129,12 +133,16 @@ class LocationTrackingService : Service() {
                 
                 if (!isDuplicate) {
                     locationRepository.insertLocation(enriched)
-                    
+                    journeyTravelDetector.onNewLocation(enriched)
+
                     val count = locationTracker.trackingState.value.locationCount
                     updateNotification(
                         "Tracking Active",
                         "$count locations recorded"
                     )
+                } else {
+                    // Still run detection on fresh GPS even if DB deduped the row.
+                    journeyTravelDetector.onNewLocation(enriched)
                 }
             } catch (e: Exception) {
                 // Log error but don't crash the service

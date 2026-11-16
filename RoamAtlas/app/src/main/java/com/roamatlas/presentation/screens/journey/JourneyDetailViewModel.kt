@@ -7,8 +7,11 @@ import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.journey.JourneyRepository
+import com.roamatlas.data.journey.JourneyTravelDetector
 import com.roamatlas.data.journey.JourneyWithFlights
+import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -51,7 +54,9 @@ class JourneyDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val journeyRepository: JourneyRepository,
     private val airportRepository: AirportRepository,
-    private val locationRepository: LocationRepository
+    private val locationRepository: LocationRepository,
+    private val locationDao: LocationDao,
+    private val journeyTravelDetector: JourneyTravelDetector
 ) : ViewModel() {
     private val journeyId = savedStateHandle.get<String>("journeyId")?.toLongOrNull() ?: 0L
     private val _uiState = MutableStateFlow(JourneyDetailUiState())
@@ -60,10 +65,27 @@ class JourneyDetailViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            // Re-run detection when opening a journey (airplane-mode recovery).
+            runCatching {
+                locationDao.getLatestLocation()?.let { latest ->
+                    journeyTravelDetector.recheckWithLastKnown(
+                        latitude = latest.latitude,
+                        longitude = latest.longitude,
+                        timestampMillis = latest.timestampMillis,
+                        isAirborne = latest.isAirborne
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
             journeyRepository.getJourney(journeyId).collect { journey ->
                 val codes = journey?.flights.orEmpty().flatMap {
-                    listOf(it.departureAirportCode, it.arrivalAirportCode)
-                }
+                    listOf(
+                        it.departureAirportCode,
+                        it.arrivalAirportCode,
+                        it.actualArrivalAirportCode
+                    )
+                }.filterNotNull()
                 _uiState.value = _uiState.value.copy(
                     journey = journey,
                     airports = airportRepository.getByIataCodes(codes),
@@ -235,6 +257,56 @@ class JourneyDetailViewModel @Inject constructor(
         viewModelScope.launch {
             journeyRepository.setJourneyStatus(journeyId, "IN_PROGRESS")
             _uiState.value = _uiState.value.copy(message = "Journey marked in progress.")
+        }
+    }
+
+    fun markLegDelayed(flightId: Long) {
+        viewModelScope.launch {
+            journeyRepository.setTravelLegStatus(flightId, TravelLegStatus.DELAYED)
+            _uiState.value = _uiState.value.copy(message = "Leg marked delayed.")
+        }
+    }
+
+    fun markLegMissed(flightId: Long) {
+        viewModelScope.launch {
+            journeyRepository.setTravelLegStatus(flightId, TravelLegStatus.MISSED)
+            _uiState.value = _uiState.value.copy(message = "Marked missed connection.")
+        }
+    }
+
+    fun markLegDiverted(flightId: Long, airportCode: String) {
+        viewModelScope.launch {
+            journeyRepository.setTravelLegStatus(
+                flightId = flightId,
+                status = TravelLegStatus.DIVERTED,
+                actualArrivalAirportCode = airportCode
+            )
+            _uiState.value = _uiState.value.copy(
+                message = "Leg marked diverted to ${airportCode.uppercase()}."
+            )
+        }
+    }
+
+    fun markLegArrived(flightId: Long) {
+        viewModelScope.launch {
+            journeyRepository.setTravelLegStatus(flightId, TravelLegStatus.ARRIVED)
+            _uiState.value = _uiState.value.copy(message = "Leg marked arrived.")
+        }
+    }
+
+    fun markNotThisJourney(flightId: Long) {
+        viewModelScope.launch {
+            journeyRepository.markNotThisJourney(flightId)
+            _uiState.value = _uiState.value.copy(
+                message = "Ignored for GPS matching (~36h). Not counted as this journey’s travel."
+            )
+        }
+    }
+
+    fun resetLegPlanned(flightId: Long) {
+        viewModelScope.launch {
+            journeyRepository.setTravelLegStatus(flightId, TravelLegStatus.PLANNED)
+            _uiState.value = _uiState.value.copy(message = "Leg reset to planned.")
         }
     }
 

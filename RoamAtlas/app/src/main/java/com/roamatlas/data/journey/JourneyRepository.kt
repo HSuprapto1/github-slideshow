@@ -8,6 +8,7 @@ import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.JourneyStatus
 import com.roamatlas.data.local.entity.TransportMode
+import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.data.local.entity.TripEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,23 @@ enum class ConnectionRisk {
     TIGHT,
     BELOW_RECOMMENDED
 }
+
+/** Auto summary of scheduled vs GPS-inferred travel for a journey. */
+data class JourneyTravelSummary(
+    val scheduledDoorToDoorMinutes: Long,
+    val actualDoorToDoorMinutes: Long?,
+    val scheduledTransitMinutes: Long,
+    val actualAirOrTransitMinutes: Long?,
+    val scheduledLayoverMinutes: Long,
+    val actualLayoverMinutes: Long?,
+    val legsArrived: Int,
+    val legsMissed: Int,
+    val legsSkipped: Int,
+    val legsDelayed: Int,
+    val legsDiverted: Int,
+    val recoveredGapLegs: Int,
+    val highlightLines: List<String>
+)
 
 data class JourneyConnection(
     val arrivingFlight: FlightEntity,
@@ -107,6 +125,121 @@ data class JourneyWithFlights(
 
     val isCompleted: Boolean
         get() = status == JourneyStatus.COMPLETED
+
+    val travelLegs: List<FlightEntity>
+        get() = orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
+
+    val travelSummary: JourneyTravelSummary
+        get() {
+            val legs = travelLegs
+            val scheduledDoor = totalJourneyMinutes
+            val firstActualDep = legs.mapNotNull { it.actualDepartureMillis }.minOrNull()
+            val lastActualArr = legs.mapNotNull { it.actualArrivalMillis }.maxOrNull()
+            val actualDoor = if (firstActualDep != null && lastActualArr != null && lastActualArr >= firstActualDep) {
+                ((lastActualArr - firstActualDep) / 60_000).coerceAtLeast(0)
+            } else {
+                null
+            }
+            val scheduledTransit = legs.sumOf { leg ->
+                val dep = leg.estimatedDepartureTimeMillis ?: leg.departureTimeMillis
+                val arr = leg.estimatedArrivalTimeMillis ?: leg.arrivalTimeMillis
+                ((arr - dep) / 60_000).coerceAtLeast(0)
+            }
+            val actualTransitParts = legs.mapNotNull { leg ->
+                val dep = leg.actualDepartureMillis ?: return@mapNotNull null
+                val arr = leg.actualArrivalMillis ?: return@mapNotNull null
+                if (arr < dep) null else ((arr - dep) / 60_000).coerceAtLeast(0)
+            }
+            val actualTransit = if (actualTransitParts.size == legs.count {
+                    TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.ARRIVED
+                } && actualTransitParts.isNotEmpty()
+            ) {
+                actualTransitParts.sum()
+            } else if (actualTransitParts.isNotEmpty()) {
+                actualTransitParts.sum()
+            } else {
+                null
+            }
+            val scheduledLayover = connections.sumOf { it.scheduledMinutes.coerceAtLeast(0) }
+            val actualLayovers = legs.zipWithNext().mapNotNull { (a, b) ->
+                if (TransportMode.isStay(a.transportMode) || TransportMode.isStay(b.transportMode)) {
+                    return@mapNotNull null
+                }
+                val arr = a.actualArrivalMillis ?: return@mapNotNull null
+                val dep = b.actualDepartureMillis ?: return@mapNotNull null
+                ((dep - arr) / 60_000)
+            }
+            val actualLayover = actualLayovers.takeIf { it.isNotEmpty() }?.sum()
+            val arrived = legs.count {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.ARRIVED
+            }
+            val missed = legs.count {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.MISSED
+            }
+            val skipped = legs.count {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.SKIPPED
+            }
+            val delayed = legs.count {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.DELAYED
+            }
+            val diverted = legs.count {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.DIVERTED ||
+                    !it.actualArrivalAirportCode.isNullOrBlank()
+            }
+            // Airplane-mode style: arrival GPS without a real airborne stretch recorded.
+            val recovered = legs.count { leg ->
+                TravelLegStatus.normalize(leg.travelLegStatus) == TravelLegStatus.ARRIVED &&
+                    leg.actualArrivalMillis != null &&
+                    (
+                        leg.actualDepartureMillis == null ||
+                            leg.actualDepartureMillis ==
+                            (leg.estimatedDepartureTimeMillis ?: leg.departureTimeMillis)
+                    )
+            }
+            val lines = buildList {
+                if (legs.isEmpty()) {
+                    add("No travel legs yet.")
+                    return@buildList
+                }
+                add("Scheduled door-to-door · ${formatSummaryMinutes(scheduledDoor)}")
+                actualDoor?.let { add("Actual door-to-door · ${formatSummaryMinutes(it)}") }
+                add("Scheduled in-transit · ${formatSummaryMinutes(scheduledTransit)}")
+                actualTransit?.let { add("GPS in-transit · ${formatSummaryMinutes(it)}") }
+                if (scheduledLayover > 0) {
+                    add("Scheduled layovers · ${formatSummaryMinutes(scheduledLayover)}")
+                }
+                actualLayover?.let { add("Actual layovers · ${formatSummaryMinutes(it)}") }
+                if (arrived > 0 || missed > 0 || skipped > 0 || delayed > 0 || diverted > 0) {
+                    add(
+                        buildList {
+                            if (arrived > 0) add("$arrived arrived")
+                            if (delayed > 0) add("$delayed delayed")
+                            if (missed > 0) add("$missed missed")
+                            if (diverted > 0) add("$diverted diverted")
+                            if (skipped > 0) add("$skipped not this journey")
+                        }.joinToString(" · ")
+                    )
+                }
+                if (recovered > 0) {
+                    add("$recovered leg${if (recovered == 1) "" else "s"} recovered after GPS gap (airplane mode)")
+                }
+            }
+            return JourneyTravelSummary(
+                scheduledDoorToDoorMinutes = scheduledDoor,
+                actualDoorToDoorMinutes = actualDoor,
+                scheduledTransitMinutes = scheduledTransit,
+                actualAirOrTransitMinutes = actualTransit,
+                scheduledLayoverMinutes = scheduledLayover,
+                actualLayoverMinutes = actualLayover,
+                legsArrived = arrived,
+                legsMissed = missed,
+                legsSkipped = skipped,
+                legsDelayed = delayed,
+                legsDiverted = diverted,
+                recoveredGapLegs = recovered,
+                highlightLines = lines
+            )
+        }
 
     val isPast: Boolean
         get() {
@@ -291,6 +424,101 @@ class JourneyRepository @Inject constructor(
                 },
                 updatedAtMillis = System.currentTimeMillis()
             )
+        )
+    }
+
+    suspend fun setTravelLegStatus(
+        flightId: Long,
+        status: String,
+        actualArrivalAirportCode: String? = null,
+        dismissDetectionHours: Int? = null
+    ) {
+        val flight = flightDao.getFlightById(flightId) ?: return
+        val normalized = TravelLegStatus.normalize(status)
+        val now = System.currentTimeMillis()
+        val dismissedUntil = when {
+            dismissDetectionHours != null && dismissDetectionHours > 0 ->
+                now + dismissDetectionHours * 60L * 60L * 1000L
+            normalized == TravelLegStatus.SKIPPED ->
+                now + 36L * 60L * 60L * 1000L
+            else -> flight.detectionDismissedUntilMillis
+        }
+        flightDao.update(
+            flight.copy(
+                travelLegStatus = normalized,
+                actualArrivalAirportCode = when (normalized) {
+                    TravelLegStatus.DIVERTED ->
+                        actualArrivalAirportCode?.uppercase()?.takeIf { it.isNotBlank() }
+                            ?: flight.actualArrivalAirportCode
+                    TravelLegStatus.ARRIVED ->
+                        actualArrivalAirportCode?.uppercase()?.takeIf { it.isNotBlank() }
+                            ?: flight.actualArrivalAirportCode
+                    TravelLegStatus.SKIPPED, TravelLegStatus.MISSED, TravelLegStatus.PLANNED ->
+                        if (normalized == TravelLegStatus.PLANNED) null
+                        else flight.actualArrivalAirportCode
+                    else -> flight.actualArrivalAirportCode
+                },
+                actualArrivalMillis = when (normalized) {
+                    TravelLegStatus.ARRIVED -> flight.actualArrivalMillis ?: now
+                    TravelLegStatus.MISSED, TravelLegStatus.SKIPPED, TravelLegStatus.PLANNED ->
+                        if (normalized == TravelLegStatus.PLANNED) null else flight.actualArrivalMillis
+                    else -> flight.actualArrivalMillis
+                },
+                actualDepartureMillis = when (normalized) {
+                    TravelLegStatus.DEPARTED, TravelLegStatus.IN_AIR, TravelLegStatus.ARRIVED ->
+                        flight.actualDepartureMillis ?: now
+                    TravelLegStatus.PLANNED -> null
+                    else -> flight.actualDepartureMillis
+                },
+                detectionDismissedUntilMillis = dismissedUntil,
+                updatedAtMillis = now
+            )
+        )
+        val journeyId = flight.journeyId ?: return
+        when (normalized) {
+            TravelLegStatus.AT_DEPARTURE,
+            TravelLegStatus.DEPARTED,
+            TravelLegStatus.IN_AIR,
+            TravelLegStatus.DELAYED,
+            TravelLegStatus.DIVERTED,
+            TravelLegStatus.ARRIVED,
+            TravelLegStatus.MISSED -> {
+                val journey = tripDao.getById(journeyId) ?: return
+                if (JourneyStatus.normalize(journey.journeyStatus) == JourneyStatus.PLANNED) {
+                    tripDao.update(
+                        journey.copy(
+                            journeyStatus = JourneyStatus.IN_PROGRESS,
+                            updatedAtMillis = now
+                        )
+                    )
+                }
+            }
+        }
+        if (normalized == TravelLegStatus.ARRIVED) {
+            val legs = flightDao.getFlightsForJourneySnapshot(journeyId)
+                .filter { !TransportMode.isHotel(it.transportMode) }
+            val allDone = legs.isNotEmpty() && legs.all {
+                val s = TravelLegStatus.normalize(it.travelLegStatus)
+                s == TravelLegStatus.ARRIVED || s == TravelLegStatus.MISSED || s == TravelLegStatus.SKIPPED
+            }
+            if (allDone) {
+                val journey = tripDao.getById(journeyId) ?: return
+                tripDao.update(
+                    journey.copy(
+                        journeyStatus = JourneyStatus.COMPLETED,
+                        updatedAtMillis = now
+                    )
+                )
+            }
+        }
+    }
+
+    /** Soft-dismiss GPS matching for this leg (“Not this journey”). */
+    suspend fun markNotThisJourney(flightId: Long) {
+        setTravelLegStatus(
+            flightId = flightId,
+            status = TravelLegStatus.SKIPPED,
+            dismissDetectionHours = 36
         )
     }
 
@@ -506,6 +734,17 @@ class JourneyRepository @Inject constructor(
             retained.add("Airport details source: Manually entered")
         }
         return retained.joinToString("\n").takeIf { it.isNotBlank() }
+    }
+}
+
+internal fun formatSummaryMinutes(totalMinutes: Long): String {
+    val minutes = totalMinutes.coerceAtLeast(0)
+    val hours = minutes / 60
+    val rem = minutes % 60
+    return when {
+        hours == 0L -> "${rem}m"
+        rem == 0L -> "${hours}h"
+        else -> "${hours}h ${rem}m"
     }
 }
 

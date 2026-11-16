@@ -46,3 +46,41 @@ object JourneyStatus {
             else -> PLANNED
         }
 }
+
+/** Per-leg travel detection / outcome status. */
+object TravelLegStatus {
+    const val PLANNED = "PLANNED"
+    const val AT_DEPARTURE = "AT_DEPARTURE"
+    const val DEPARTED = "DEPARTED"
+    const val IN_AIR = "IN_AIR"
+    const val ARRIVED = "ARRIVED"
+    const val DELAYED = "DELAYED"
+    const val MISSED = "MISSED"
+    const val DIVERTED = "DIVERTED"
+    const val SKIPPED = "SKIPPED" // "Not this journey"
+
+    fun label(status: String?): String = when (status?.uppercase()) {
+        AT_DEPARTURE -> "At departure"
+        DEPARTED -> "Departed"
+        IN_AIR -> "In the air"
+        ARRIVED -> "Arrived"
+        DELAYED -> "Delayed"
+        MISSED -> "Missed connection"
+        DIVERTED -> "Diverted"
+        SKIPPED -> "Not this journey"
+        else -> "Planned"
+    }
+
+    fun normalize(status: String?): String =
+        when (status?.uppercase()) {
+            AT_DEPARTURE -> AT_DEPARTURE
+            DEPARTED -> DEPARTED
+            IN_AIR -> IN_AIR
+            ARRIVED -> ARRIVED
+            DELAYED -> DELAYED
+            MISSED -> MISSED
+            DIVERTED -> DIVERTED
+            SKIPPED -> SKIPPED
+            else -> PLANNED
+        }
+}

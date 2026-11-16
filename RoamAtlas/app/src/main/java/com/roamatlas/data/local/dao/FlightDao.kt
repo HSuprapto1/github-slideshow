@@ -33,6 +33,15 @@ interface FlightDao {
     @Query("SELECT * FROM flights WHERE journeyId = :journeyId ORDER BY journeySequence ASC, departureTimeMillis ASC")
     fun getFlightsForJourney(journeyId: Long): Flow<List<FlightEntity>>
 
+    @Query(
+        """
+        SELECT * FROM flights
+        WHERE journeyId = :journeyId
+        ORDER BY journeySequence ASC, departureTimeMillis ASC
+        """
+    )
+    suspend fun getFlightsForJourneySnapshot(journeyId: Long): List<FlightEntity>
+
     @Query("SELECT * FROM flights WHERE journeyId IS NULL ORDER BY departureTimeMillis ASC")
     fun getUnassignedFlights(): Flow<List<FlightEntity>>
 

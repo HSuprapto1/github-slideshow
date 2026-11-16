@@ -90,6 +90,7 @@ import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.JourneyStatus
 import com.roamatlas.data.local.entity.TransportMode
+import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.presentation.components.PhotoAttachmentSection
 import com.roamatlas.presentation.components.PhotoFullScreenViewer
@@ -175,6 +176,7 @@ fun JourneyDetailScreen(
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
                 item { JourneyHeader(value, state.nowMillis) }
+                item { JourneyTravelSummaryCard(value) }
                 item {
                     JourneyStatusActions(
                         journey = value,
@@ -226,8 +228,17 @@ fun JourneyDetailScreen(
                     FlightLegCard(
                         flight = flight,
                         departureAirport = state.airports[flight.departureAirportCode],
-                        arrivalAirport = state.airports[flight.arrivalAirportCode],
+                        arrivalAirport = state.airports[
+                            flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                                ?: flight.arrivalAirportCode
+                        ],
                         onEdit = { editingFlight = flight },
+                        onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
+                        onMarkMissed = { viewModel.markLegMissed(flight.id) },
+                        onMarkDiverted = { code -> viewModel.markLegDiverted(flight.id, code) },
+                        onMarkArrived = { viewModel.markLegArrived(flight.id) },
+                        onNotThisJourney = { viewModel.markNotThisJourney(flight.id) },
+                        onResetPlanned = { viewModel.resetLegPlanned(flight.id) },
                         onSetTicketPhoto = { uri ->
                             viewModel.setFlightTicketPhoto(flight.id, uri)
                         },
@@ -511,6 +522,32 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
 }
 
 @Composable
+private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
+    val summary = journey.travelSummary
+    if (journey.travelLegs.isEmpty()) return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Travel summary",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Updates from GPS near airports, including after airplane-mode gaps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            summary.highlightLines.forEach { line ->
+                Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
 private fun JourneyStatusActions(
     journey: JourneyWithFlights,
     onMarkCompleted: () -> Unit,
@@ -527,8 +564,9 @@ private fun JourneyStatusActions(
         ) {
             Text("Journey status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Mark completed when you finish the trip, or cancelled even if you were already at the airport. " +
-                    "Airport auto-detect comes later — these actions work now.",
+                "GPS auto-detects airport arrival/departure when tracking is on. " +
+                    "Mark completed when you finish, or cancelled even if you were already at the airport. " +
+                    "Per-leg Delayed / Missed / Diverted / Not this journey are on each leg below.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -896,12 +934,20 @@ private fun FlightLegCard(
     departureAirport: Airport?,
     arrivalAirport: Airport?,
     onEdit: () -> Unit,
+    onMarkDelayed: () -> Unit,
+    onMarkMissed: () -> Unit,
+    onMarkDiverted: (String) -> Unit,
+    onMarkArrived: () -> Unit,
+    onNotThisJourney: () -> Unit,
+    onResetPlanned: () -> Unit,
     onSetTicketPhoto: (Uri) -> Unit,
     onClearTicketPhoto: () -> Unit,
     onOpenTicketPhoto: (String) -> Unit
 ) {
     val context = LocalContext.current
     var showAttachDialog by remember { mutableStateOf(false) }
+    var showDivertDialog by remember { mutableStateOf(false) }
+    var divertCode by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
     val documentLauncher = rememberLauncherForActivityResult(
@@ -1005,7 +1051,16 @@ private fun FlightLegCard(
                         arrivalAirport
                     )
                 )
-                flight.flightStatus?.let { Text("Status: $it", fontWeight = FontWeight.SemiBold) }
+                val legStatus = TravelLegStatus.normalize(flight.travelLegStatus)
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text(TravelLegStatus.label(legStatus)) }
+                )
+                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }?.let { code ->
+                    Text("Actual arrival · $code", fontWeight = FontWeight.SemiBold)
+                }
+                flight.flightStatus?.let { Text("Ops status: $it", fontWeight = FontWeight.SemiBold) }
                 if (TransportMode.isFlight(flight.transportMode)) {
                     Text(
                         "Aircraft: ${flight.aircraftType ?: "Not available yet"} · Seat: ${flight.seatNumber ?: "Not available yet"}",
@@ -1026,6 +1081,14 @@ private fun FlightLegCard(
                 flight.bookingReference?.takeIf { it.isNotBlank() }?.let {
                     Text("Booking ref · $it", style = MaterialTheme.typography.bodySmall)
                 }
+                TravelLegActionsRow(
+                    onMarkDelayed = onMarkDelayed,
+                    onMarkMissed = onMarkMissed,
+                    onMarkDiverted = { showDivertDialog = true },
+                    onMarkArrived = onMarkArrived,
+                    onNotThisJourney = onNotThisJourney,
+                    onResetPlanned = onResetPlanned
+                )
             }
             Text(
                 if (isHotel) "Confirmation / voucher" else "Ticket / boarding pass",
@@ -1100,6 +1163,83 @@ private fun FlightLegCard(
                 TextButton(onClick = { showAttachDialog = false }) { Text("Cancel") }
             }
         )
+    }
+    if (showDivertDialog) {
+        AlertDialog(
+            onDismissRequest = { showDivertDialog = false },
+            title = { Text("Diverted to…") },
+            text = {
+                OutlinedTextField(
+                    value = divertCode,
+                    onValueChange = { divertCode = it.uppercase().take(4) },
+                    label = { Text("Airport code") },
+                    placeholder = { Text("e.g. CGK") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val code = divertCode.trim()
+                        if (code.length >= 3) {
+                            showDivertDialog = false
+                            onMarkDiverted(code)
+                            divertCode = ""
+                        }
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDivertDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun TravelLegActionsRow(
+    onMarkDelayed: () -> Unit,
+    onMarkMissed: () -> Unit,
+    onMarkDiverted: () -> Unit,
+    onMarkArrived: () -> Unit,
+    onNotThisJourney: () -> Unit,
+    onResetPlanned: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Travel detection",
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedButton(onClick = onMarkDelayed, modifier = Modifier.weight(1f)) {
+                Text("Delayed", style = MaterialTheme.typography.labelSmall)
+            }
+            OutlinedButton(onClick = onMarkMissed, modifier = Modifier.weight(1f)) {
+                Text("Missed", style = MaterialTheme.typography.labelSmall)
+            }
+            OutlinedButton(onClick = onMarkDiverted, modifier = Modifier.weight(1f)) {
+                Text("Diverted", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedButton(onClick = onMarkArrived, modifier = Modifier.weight(1f)) {
+                Text("Arrived", style = MaterialTheme.typography.labelSmall)
+            }
+            OutlinedButton(onClick = onNotThisJourney, modifier = Modifier.weight(1f)) {
+                Text("Not this journey", style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = onResetPlanned, modifier = Modifier.weight(1f)) {
+                Text("Reset", style = MaterialTheme.typography.labelSmall)
+            }
+        }
     }
 }
 

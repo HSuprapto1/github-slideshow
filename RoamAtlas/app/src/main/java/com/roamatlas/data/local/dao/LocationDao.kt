@@ -384,6 +384,15 @@ interface LocationDao {
     
     @Query("SELECT MAX(timestampMillis) FROM locations")
     suspend fun getLatestTimestamp(): Long?
+
+    @Query(
+        """
+        SELECT * FROM locations
+        ORDER BY timestampMillis DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getLatestLocation(): LocationEntity?
     
     @Query("SELECT * FROM locations WHERE originalSourceId = :sourceId LIMIT 1")
     suspend fun getByOriginalSourceId(sourceId: String): LocationEntity?

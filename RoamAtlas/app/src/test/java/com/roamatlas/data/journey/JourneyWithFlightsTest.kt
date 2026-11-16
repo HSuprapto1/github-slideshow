@@ -45,6 +45,52 @@ class JourneyWithFlightsTest {
         assertEquals(ConnectionRisk.BELOW_RECOMMENDED, connection.risk)
     }
 
+    @Test
+    fun `travel summary uses actual times when present`() {
+        val first = flight(
+            id = 1,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_600_000
+        ).copy(
+            travelLegStatus = "ARRIVED",
+            actualDepartureMillis = 1_200_000,
+            actualArrivalMillis = 5_000_000
+        )
+        val second = flight(
+            id = 2,
+            departure = "SIN",
+            arrival = "HND",
+            departureTime = 11_800_000,
+            arrivalTime = 25_000_000
+        ).copy(
+            travelLegStatus = "ARRIVED",
+            actualDepartureMillis = 12_000_000,
+            actualArrivalMillis = 26_000_000
+        )
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "Test journey",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "JP",
+                destinationCity = "Tokyo",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(first, second)
+        )
+        val summary = journey.travelSummary
+        assertEquals(2, summary.legsArrived)
+        assertEquals(((26_000_000L - 1_200_000L) / 60_000L), summary.actualDoorToDoorMinutes)
+        assertEquals(true, summary.highlightLines.any { it.contains("Actual door-to-door") })
+    }
+
     private fun flight(
         id: Long,
         departure: String,

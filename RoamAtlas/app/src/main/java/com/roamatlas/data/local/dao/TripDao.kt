@@ -32,6 +32,15 @@ interface TripDao {
     @Query("SELECT * FROM trips ORDER BY id ASC")
     suspend fun getAllSnapshot(): List<TripEntity>
 
+    @Query(
+        """
+        SELECT * FROM trips
+        WHERE IFNULL(journeyStatus, 'PLANNED') IN ('PLANNED', 'IN_PROGRESS')
+        ORDER BY startDateEpochDay ASC
+        """
+    )
+    suspend fun getActiveJourneys(): List<TripEntity>
+
     @Query("DELETE FROM trips")
     suspend fun deleteAll()
 }

@@ -46,7 +46,15 @@ data class FlightEntity(
     val separateTicketFromPrevious: Boolean? = null,
     val minimumConnectionMinutes: Int? = null,
     /** FLIGHT, TRAIN, BUS, or HOTEL — stations/cities reuse airport code fields. */
-    val transportMode: String = TransportMode.FLIGHT
+    val transportMode: String = TransportMode.FLIGHT,
+    /** Travel detection outcome — see [TravelLegStatus]. */
+    val travelLegStatus: String? = null,
+    val actualDepartureMillis: Long? = null,
+    val actualArrivalMillis: Long? = null,
+    /** When diverted, the airport where the leg actually ended. */
+    val actualArrivalAirportCode: String? = null,
+    /** Soft-dismiss GPS prompts for this leg until this time ("Not this journey"). */
+    val detectionDismissedUntilMillis: Long? = null
 )
 
 object TransportMode {
