@@ -1,5 +1,6 @@
 package com.roamatlas.presentation.screens.map
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,6 +41,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
@@ -57,6 +60,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -211,8 +215,8 @@ fun MapScreenV2(
                 EmptyMapView()
             } else {
                 val selectedBottomPad = when {
-                    uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 360.dp
-                    uiState.selectedLocation != null -> 180.dp
+                    uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 400.dp
+                    uiState.selectedLocation != null -> 230.dp
                     else -> 0.dp
                 }
                 GoogleMap(
@@ -331,8 +335,8 @@ fun MapScreenV2(
                     .padding(16.dp)
                     .padding(
                         bottom = when {
-                            uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 360.dp
-                            uiState.selectedLocation != null -> 160.dp
+                            uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 400.dp
+                            uiState.selectedLocation != null -> 210.dp
                             else -> 0.dp
                         }
                     ),
@@ -585,7 +589,11 @@ private fun LocationDetailCard(
     onOpenFullPhoto: (String) -> Unit = {},
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
     val fullPhotoUri = location.fullPhotoUri()
+    val placeLabel = location.city
+        ?: location.countryName
+        ?: formatTimestamp(location.timestamp)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -692,6 +700,63 @@ private fun LocationDetailCard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    openInGoogleMaps(
+                        context = context,
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        label = placeLabel
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Map,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open in Google Maps")
+            }
+        }
+    }
+}
+
+private fun openInGoogleMaps(
+    context: android.content.Context,
+    latitude: Double,
+    longitude: Double,
+    label: String?
+) {
+    val queryLabel = label?.takeIf { it.isNotBlank() }
+    val query = buildString {
+        append(latitude)
+        append(',')
+        append(longitude)
+        if (queryLabel != null) {
+            append(" (")
+            append(queryLabel)
+            append(')')
+        }
+    }
+    val httpsUri = Uri.parse(
+        "https://www.google.com/maps/search/?api=1&query=${Uri.encode(query)}"
+    )
+    val mapsIntent = Intent(Intent.ACTION_VIEW, httpsUri).apply {
+        setPackage("com.google.android.apps.maps")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    val launched = runCatching { context.startActivity(mapsIntent) }.isSuccess
+    if (!launched) {
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, httpsUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
         }
     }
 }

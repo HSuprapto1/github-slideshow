@@ -22,8 +22,8 @@ android {
         applicationId = "com.roamatlas"
         minSdk = 26
         targetSdk = 34
-        versionCode = 49
-        versionName = "0.39.8"
+        versionCode = 50
+        versionName = "0.39.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
