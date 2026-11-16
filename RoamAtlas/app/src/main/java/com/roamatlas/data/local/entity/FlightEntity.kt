@@ -61,11 +61,15 @@ object TransportMode {
     const val FLIGHT = "FLIGHT"
     const val TRAIN = "TRAIN"
     const val BUS = "BUS"
+    const val TAXI = "TAXI"
+    const val OTHER = "OTHER"
     const val HOTEL = "HOTEL"
 
     fun label(mode: String?): String = when (mode?.uppercase()) {
         TRAIN -> "Train"
         BUS -> "Bus"
+        TAXI -> "Taxi"
+        OTHER -> "Other"
         HOTEL -> "Hotel"
         else -> "Flight"
     }
@@ -77,6 +81,12 @@ object TransportMode {
         mode.equals(HOTEL, ignoreCase = true)
 
     fun isStay(mode: String?): Boolean = isHotel(mode)
+
+    fun isGround(mode: String?): Boolean =
+        mode.equals(TRAIN, ignoreCase = true) ||
+            mode.equals(BUS, ignoreCase = true) ||
+            mode.equals(TAXI, ignoreCase = true) ||
+            mode.equals(OTHER, ignoreCase = true)
 }
 
 @Entity(tableName = "trips")

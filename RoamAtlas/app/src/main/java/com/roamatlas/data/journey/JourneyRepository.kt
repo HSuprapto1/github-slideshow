@@ -19,6 +19,7 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -99,10 +100,34 @@ data class JourneyWithFlights(
         get() = flights.count { TransportMode.isFlight(it.transportMode) }
 
     val groundTransportCount: Int
-        get() = flights.count {
-            it.transportMode.equals(TransportMode.TRAIN, ignoreCase = true) ||
-                it.transportMode.equals(TransportMode.BUS, ignoreCase = true)
+        get() = flights.count { TransportMode.isGround(it.transportMode) }
+
+    /** Booked travel legs are settled; journey may still be open for ground / destination. */
+    val bookedLegsSettled: Boolean
+        get() {
+            val legs = travelLegs
+            if (legs.isEmpty()) return false
+            return legs.all {
+                val s = TravelLegStatus.normalize(it.travelLegStatus)
+                s == TravelLegStatus.ARRIVED ||
+                    s == TravelLegStatus.MISSED ||
+                    s == TravelLegStatus.SKIPPED
+            }
         }
+
+    val lastSettledArrivalLabel: String?
+        get() {
+            val leg = travelLegs.lastOrNull {
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.ARRIVED
+            } ?: return null
+            return leg.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                ?: leg.arrivalCity?.takeIf { it.isNotBlank() }
+                ?: leg.arrivalAirportName?.takeIf { it.isNotBlank() }
+                ?: leg.arrivalAirportCode
+        }
+
+    val stillTravelingAfterBookedLegs: Boolean
+        get() = !isCancelled && !isCompleted && bookedLegsSettled
 
     val hotelCount: Int
         get() = flights.count { TransportMode.isHotel(it.transportMode) }
@@ -494,23 +519,8 @@ class JourneyRepository @Inject constructor(
                 }
             }
         }
-        if (normalized == TravelLegStatus.ARRIVED) {
-            val legs = flightDao.getFlightsForJourneySnapshot(journeyId)
-                .filter { !TransportMode.isHotel(it.transportMode) }
-            val allDone = legs.isNotEmpty() && legs.all {
-                val s = TravelLegStatus.normalize(it.travelLegStatus)
-                s == TravelLegStatus.ARRIVED || s == TravelLegStatus.MISSED || s == TravelLegStatus.SKIPPED
-            }
-            if (allDone) {
-                val journey = tripDao.getById(journeyId) ?: return
-                tripDao.update(
-                    journey.copy(
-                        journeyStatus = JourneyStatus.COMPLETED,
-                        updatedAtMillis = now
-                    )
-                )
-            }
-        }
+        // Intentionally do not auto-complete the journey when all booked legs settle.
+        // Final destination may be office / home / warehouse / port after the last airport.
     }
 
     /** Soft-dismiss GPS matching for this leg (“Not this journey”). */
@@ -520,6 +530,118 @@ class JourneyRepository @Inject constructor(
             status = TravelLegStatus.SKIPPED,
             dismissDetectionHours = 36
         )
+    }
+
+    /**
+     * Quick ground continuation after flights (taxi/train/bus/other) to a named place
+     * such as office, home, warehouse, or port.
+     */
+    suspend fun addGroundLeg(
+        journeyId: Long,
+        transportMode: String,
+        destinationName: String,
+        fromName: String? = null
+    ): Long? {
+        val journey = tripDao.getById(journeyId) ?: return null
+        val dest = destinationName.trim()
+        if (dest.isEmpty()) return null
+        val mode = when (transportMode.uppercase()) {
+            TransportMode.TRAIN -> TransportMode.TRAIN
+            TransportMode.BUS -> TransportMode.BUS
+            TransportMode.TAXI -> TransportMode.TAXI
+            else -> TransportMode.OTHER
+        }
+        val existing = flightDao.getFlightsForJourneySnapshot(journeyId)
+        val lastTravel = existing
+            .filterNot { TransportMode.isHotel(it.transportMode) }
+            .maxWithOrNull(
+                compareBy<FlightEntity> { it.journeySequence ?: Int.MAX_VALUE }
+                    .thenBy { it.arrivalTimeMillis }
+            )
+        val fromLabel = fromName?.trim()?.takeIf { it.isNotBlank() }
+            ?: lastTravel?.let {
+                it.actualArrivalAirportCode?.takeIf { c -> c.isNotBlank() }
+                    ?: it.arrivalCity?.takeIf { c -> c.isNotBlank() }
+                    ?: it.arrivalAirportCode
+            }
+            ?: "Start"
+        val fromCode = lastTravel?.let {
+            it.actualArrivalAirportCode?.takeIf { c -> c.isNotBlank() } ?: it.arrivalAirportCode
+        } ?: abbreviatePlaceCode(fromLabel)
+        val toCode = abbreviatePlaceCode(dest)
+        val now = System.currentTimeMillis()
+        val startMillis = lastTravel?.actualArrivalMillis
+            ?: lastTravel?.estimatedArrivalTimeMillis
+            ?: lastTravel?.arrivalTimeMillis
+            ?: now
+        val endMillis = startMillis + 60L * 60L * 1000L
+        val nextSequence = (existing.maxOfOrNull { it.journeySequence ?: -1 } ?: -1) + 1
+        val id = flightDao.insert(
+            FlightEntity(
+                departureAirportCode = fromCode,
+                departureAirportName = fromLabel,
+                departureCity = fromLabel,
+                departureCountryCode = lastTravel?.arrivalCountryCode,
+                arrivalAirportCode = toCode,
+                arrivalAirportName = dest,
+                arrivalCity = dest,
+                arrivalCountryCode = lastTravel?.arrivalCountryCode,
+                departureTimeMillis = startMillis,
+                arrivalTimeMillis = endMillis,
+                flightNumber = null,
+                airline = null,
+                aircraftType = null,
+                distanceKm = null,
+                durationMinutes = null,
+                seatNumber = null,
+                bookingReference = null,
+                notes = "Ground leg · $fromLabel → $dest",
+                photoUri = null,
+                source = "GROUND_LEG",
+                createdAtMillis = now,
+                updatedAtMillis = now,
+                journeyId = journeyId,
+                journeySequence = nextSequence,
+                transportMode = mode,
+                travelLegStatus = TravelLegStatus.PLANNED
+            )
+        )
+        val zone = ZoneId.systemDefault()
+        val endDay = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate().toEpochDay()
+        val today = LocalDate.now(zone).toEpochDay()
+        val newEnd = maxOf(journey.endDateEpochDay ?: journey.startDateEpochDay, endDay, today)
+        if (newEnd != journey.endDateEpochDay ||
+            JourneyStatus.normalize(journey.journeyStatus) == JourneyStatus.PLANNED
+        ) {
+            tripDao.update(
+                journey.copy(
+                    endDateEpochDay = newEnd,
+                    journeyStatus = when (JourneyStatus.normalize(journey.journeyStatus)) {
+                        JourneyStatus.CANCELLED, JourneyStatus.COMPLETED -> journey.journeyStatus
+                        else -> JourneyStatus.IN_PROGRESS
+                    },
+                    updatedAtMillis = now
+                )
+            )
+        }
+        return id
+    }
+
+    /** Keep the journey date shell open through today while still traveling. */
+    suspend fun ensureOpenThroughToday(journeyId: Long) {
+        val journey = tripDao.getById(journeyId) ?: return
+        val status = JourneyStatus.normalize(journey.journeyStatus)
+        if (status != JourneyStatus.IN_PROGRESS && status != JourneyStatus.PLANNED) return
+        val today = LocalDate.now(ZoneId.systemDefault()).toEpochDay()
+        val end = journey.endDateEpochDay ?: journey.startDateEpochDay
+        if (today > end) {
+            tripDao.update(
+                journey.copy(
+                    endDateEpochDay = today,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     suspend fun attachFlightToJourney(journeyId: Long, flightId: Long): Boolean {
@@ -734,6 +856,15 @@ class JourneyRepository @Inject constructor(
             retained.add("Airport details source: Manually entered")
         }
         return retained.joinToString("\n").takeIf { it.isNotBlank() }
+    }
+}
+
+internal fun abbreviatePlaceCode(name: String): String {
+    val letters = name.uppercase(Locale.getDefault()).filter { it.isLetterOrDigit() }
+    return when {
+        letters.length >= 3 -> letters.take(4)
+        letters.isNotEmpty() -> letters.padEnd(3, 'X')
+        else -> "DEST"
     }
 }
 

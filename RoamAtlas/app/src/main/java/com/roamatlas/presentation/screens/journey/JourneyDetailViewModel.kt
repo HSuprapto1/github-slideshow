@@ -229,7 +229,28 @@ class JourneyDetailViewModel @Inject constructor(
     fun markJourneyCompleted() {
         viewModelScope.launch {
             journeyRepository.setJourneyStatus(journeyId, "COMPLETED")
-            _uiState.value = _uiState.value.copy(message = "Journey marked completed.")
+            _uiState.value = _uiState.value.copy(
+                message = "Arrived at destination · journey completed. GPS after this won’t attach here."
+            )
+        }
+    }
+
+    fun addGroundLeg(transportMode: String, destinationName: String, fromName: String?) {
+        viewModelScope.launch {
+            val id = journeyRepository.addGroundLeg(
+                journeyId = journeyId,
+                transportMode = transportMode,
+                destinationName = destinationName,
+                fromName = fromName
+            )
+            _uiState.value = _uiState.value.copy(
+                message = if (id != null) {
+                    "Ground leg added. GPS and photos stay on this journey until you arrive."
+                } else {
+                    null
+                },
+                errorMessage = if (id == null) "Could not add ground leg. Enter a destination." else null
+            )
         }
     }
 
@@ -320,16 +341,30 @@ class JourneyDetailViewModel @Inject constructor(
     private fun loadTimelineForJourney(journey: JourneyWithFlights) {
         timelineJob?.cancel()
         timelineJob = viewModelScope.launch {
+            // While still traveling, keep the date shell open through today so post-airport
+            // GPS and photos remain part of this journey.
+            if (!journey.isCompleted && !journey.isCancelled) {
+                journeyRepository.ensureOpenThroughToday(journeyId)
+            }
             val zone = ZoneId.systemDefault()
+            val refreshed = journeyRepository.getJourney(journeyId).first() ?: journey
             // Prefer editable journey date range so early arrivals / late departures stay in scope.
-            val startMillis = LocalDate.ofEpochDay(journey.journey.startDateEpochDay)
+            val endDay = refreshed.journey.endDateEpochDay
+                ?: refreshed.journey.startDateEpochDay
+            val effectiveEndDay = if (!refreshed.isCompleted && !refreshed.isCancelled) {
+                maxOf(endDay, LocalDate.now(zone).toEpochDay())
+            } else {
+                endDay
+            }
+            val startMillis = LocalDate.ofEpochDay(refreshed.journey.startDateEpochDay)
                 .atStartOfDay(zone)
                 .toInstant()
                 .toEpochMilli()
-            val endExclusive = (journey.journey.endDateEpochDay
-                ?: journey.journey.startDateEpochDay).let {
-                LocalDate.ofEpochDay(it).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            }
+            val endExclusive = LocalDate.ofEpochDay(effectiveEndDay)
+                .plusDays(1)
+                .atStartOfDay(zone)
+                .toInstant()
+                .toEpochMilli()
 
             val sampleEvery = 1
             val gps = runCatching {

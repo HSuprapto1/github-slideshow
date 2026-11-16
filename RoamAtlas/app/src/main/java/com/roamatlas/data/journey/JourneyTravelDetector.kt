@@ -235,7 +235,9 @@ class JourneyTravelDetector @Inject constructor(
                     journeyId = trip.id
                 )
                 journeyTouched = true
-                maybeCompleteJourney(trip, legs, index, now)
+                // Do not auto-complete the journey: airport arrival is often not the
+                // final destination (taxi/train to office, home, warehouse, port, etc.).
+                notifyBookedLegsDoneIfNeeded(trip)
             }
         }
         if (journeyTouched) {
@@ -243,33 +245,36 @@ class JourneyTravelDetector @Inject constructor(
         }
     }
 
-    private suspend fun maybeCompleteJourney(
-        trip: TripEntity,
-        legs: List<FlightEntity>,
-        justArrivedIndex: Int,
-        now: Long
-    ) {
+    private suspend fun notifyBookedLegsDoneIfNeeded(trip: TripEntity) {
+        if (JourneyStatus.normalize(trip.journeyStatus) == JourneyStatus.COMPLETED ||
+            JourneyStatus.normalize(trip.journeyStatus) == JourneyStatus.CANCELLED
+        ) {
+            return
+        }
         val refreshed = flightDao.getFlightsForJourneySnapshot(trip.id)
             .filter { !TransportMode.isHotel(it.transportMode) }
-        val allArrived = refreshed.all {
+        if (refreshed.isEmpty()) return
+        val allSettled = refreshed.all {
             val s = TravelLegStatus.normalize(it.travelLegStatus)
             s == TravelLegStatus.ARRIVED || s == TravelLegStatus.MISSED || s == TravelLegStatus.SKIPPED
         }
-        val lastIndex = refreshed.lastIndex
-        if (allArrived || justArrivedIndex >= lastIndex) {
-            tripDao.update(
-                trip.copy(
-                    journeyStatus = JourneyStatus.COMPLETED,
-                    updatedAtMillis = now
-                )
-            )
-            notifier.notifyOnce(
-                key = "done_${trip.id}",
-                title = "Journey completed · ${trip.name}",
-                text = "Open the journey for travel time, air time estimate, and layover summary.",
-                journeyId = trip.id
-            )
+        if (!allSettled) return
+        val lastCode = refreshed.lastOrNull()?.let {
+            it.actualArrivalAirportCode?.takeIf { code -> code.isNotBlank() } ?: it.arrivalAirportCode
         }
+        ensureJourneyInProgress(trip)
+        notifier.notifyOnce(
+            key = "legs_done_${trip.id}",
+            title = "Booked legs done · ${trip.name}",
+            text = buildString {
+                if (!lastCode.isNullOrBlank()) {
+                    append("Arrived at $lastCode. ")
+                }
+                append("Journey stays in progress so GPS and photos still count. ")
+                append("Add a ground leg if you like, then tap “I’ve arrived at my destination” when done.")
+            },
+            journeyId = trip.id
+        )
     }
 
     private suspend fun ensureJourneyInProgress(trip: TripEntity) {

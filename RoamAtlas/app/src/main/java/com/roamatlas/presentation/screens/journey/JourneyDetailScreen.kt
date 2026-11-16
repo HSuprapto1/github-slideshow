@@ -122,6 +122,7 @@ fun JourneyDetailScreen(
     var showShare by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
+    var showGroundLegDialog by remember { mutableStateOf(false) }
     var editingFlight by remember { mutableStateOf<FlightEntity?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -183,7 +184,8 @@ fun JourneyDetailScreen(
                         onMarkCompleted = viewModel::markJourneyCompleted,
                         onMarkCancelled = viewModel::markJourneyCancelled,
                         onMarkInProgress = viewModel::markJourneyInProgress,
-                        onMarkPlanned = viewModel::markJourneyPlanned
+                        onMarkPlanned = viewModel::markJourneyPlanned,
+                        onAddGroundLeg = { showGroundLegDialog = true }
                     )
                 }
                 if (value.journey.notes != null) {
@@ -340,6 +342,13 @@ fun JourneyDetailScreen(
             title = { Text("Add to journey") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            showGroundLegDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Ground leg (taxi / train / bus / other)") }
                     listOf(
                         TransportMode.FLIGHT to "Flight",
                         TransportMode.TRAIN to "Train",
@@ -359,6 +368,21 @@ fun JourneyDetailScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showAddMenu = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showGroundLegDialog && journey != null) {
+        AddGroundLegDialog(
+            suggestedFrom = journey.lastSettledArrivalLabel
+                ?: journey.orderedFlights
+                    .filterNot { TransportMode.isHotel(it.transportMode) }
+                    .lastOrNull()
+                    ?.let { it.arrivalCity ?: it.arrivalAirportCode },
+            onDismiss = { showGroundLegDialog = false },
+            onSave = { mode, destination, from ->
+                viewModel.addGroundLeg(mode, destination, from)
+                showGroundLegDialog = false
             }
         )
     }
@@ -459,10 +483,17 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
     )
     val dateFmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
     val status = JourneyStatus.label(journey.status)
+    val settledLabel = journey.lastSettledArrivalLabel
     val headline = when {
         journey.isCancelled ->
             journey.journey.cancelReason?.let { "Cancelled · $it" } ?: "Cancelled"
         journey.isCompleted -> "Journey completed"
+        journey.stillTravelingAfterBookedLegs ->
+            if (settledLabel != null) {
+                "Arrived at $settledLabel · still traveling to destination"
+            } else {
+                "Booked legs done · still traveling to destination"
+            }
         journey.orderedFlights.isEmpty() -> "Trip shell · add your first leg"
         first != null && now < first ->
             "Departs in ${formatDuration((first - now) / 60_000)}"
@@ -517,6 +548,13 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                 }
             }
             Text(journey.legSummaryText, style = MaterialTheme.typography.bodyMedium)
+            if (journey.stillTravelingAfterBookedLegs) {
+                Text(
+                    "GPS and photos keep attaching here until you mark that you’ve arrived.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                )
+            }
         }
     }
 }
@@ -536,12 +574,20 @@ private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Updates from GPS near airports, including after airplane-mode gaps.",
+                "Airport GPS detection, airplane-mode recovery, and ground travel after the last flight " +
+                    "while the journey is still in progress.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             summary.highlightLines.forEach { line ->
                 Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (journey.stillTravelingAfterBookedLegs) {
+                Text(
+                    "Booked legs settled — journey still open for ground travel and photos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }
@@ -553,7 +599,8 @@ private fun JourneyStatusActions(
     onMarkCompleted: () -> Unit,
     onMarkCancelled: (String?) -> Unit,
     onMarkInProgress: () -> Unit,
-    onMarkPlanned: () -> Unit
+    onMarkPlanned: () -> Unit,
+    onAddGroundLeg: () -> Unit
 ) {
     var showCancelDialog by remember { mutableStateOf(false) }
     var cancelReason by remember { mutableStateOf("") }
@@ -564,37 +611,38 @@ private fun JourneyStatusActions(
         ) {
             Text("Journey status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "GPS auto-detects airport arrival/departure when tracking is on. " +
-                    "Mark completed when you finish, or cancelled even if you were already at the airport. " +
+                "Last airport is not automatically the end. Keep traveling (taxi, train, etc.) and " +
+                    "tap “I’ve arrived at my destination” when you’re done. " +
                     "Per-leg Delayed / Missed / Diverted / Not this journey are on each leg below.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (!journey.isCompleted && !journey.isCancelled) {
+                Button(
+                    onClick = onMarkCompleted,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("I’ve arrived at my destination") }
+                OutlinedButton(
+                    onClick = onAddGroundLeg,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Add ground leg") }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (!journey.isCompleted) {
-                    Button(
-                        onClick = onMarkCompleted,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Completed") }
-                }
                 if (!journey.isCancelled) {
                     OutlinedButton(
                         onClick = { showCancelDialog = true },
                         modifier = Modifier.weight(1f)
                     ) { Text("Cancelled") }
                 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onMarkInProgress,
-                    modifier = Modifier.weight(1f)
-                ) { Text("In progress") }
+                if (journey.isCompleted || journey.isCancelled) {
+                    OutlinedButton(
+                        onClick = onMarkInProgress,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("In progress") }
+                }
                 OutlinedButton(
                     onClick = onMarkPlanned,
                     modifier = Modifier.weight(1f)
@@ -1270,6 +1318,77 @@ private fun openTicketAttachment(context: android.content.Context, uriString: St
     }.onFailure {
         Toast.makeText(context, "Could not open PDF", Toast.LENGTH_SHORT).show()
     }
+}
+
+@Composable
+private fun AddGroundLegDialog(
+    suggestedFrom: String?,
+    onDismiss: () -> Unit,
+    onSave: (mode: String, destination: String, from: String?) -> Unit
+) {
+    var mode by remember { mutableStateOf(TransportMode.TAXI) }
+    var destination by remember { mutableStateOf("") }
+    var from by remember { mutableStateOf(suggestedFrom.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add ground leg") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "After the airport (or any stop), continue to office, home, warehouse, port, hotel…",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        TransportMode.TAXI to "Taxi",
+                        TransportMode.TRAIN to "Train",
+                        TransportMode.BUS to "Bus",
+                        TransportMode.OTHER to "Other"
+                    ).forEach { (value, label) ->
+                        FilterChip(
+                            selected = mode == value,
+                            onClick = { mode = value },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = from,
+                    onValueChange = { from = it },
+                    label = { Text("From (optional)") },
+                    placeholder = { Text(suggestedFrom ?: "Last airport / station") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = destination,
+                    onValueChange = { destination = it },
+                    label = { Text("Destination") },
+                    placeholder = { Text("Office, home, warehouse…") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        mode,
+                        destination.trim(),
+                        from.trim().takeIf { it.isNotBlank() }
+                    )
+                },
+                enabled = destination.trim().isNotEmpty()
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable

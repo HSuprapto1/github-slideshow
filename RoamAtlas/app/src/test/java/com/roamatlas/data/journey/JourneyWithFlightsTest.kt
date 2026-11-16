@@ -91,6 +91,37 @@ class JourneyWithFlightsTest {
         assertEquals(true, summary.highlightLines.any { it.contains("Actual door-to-door") })
     }
 
+    @Test
+    fun `booked legs settled keeps journey still traveling until completed`() {
+        val first = flight(
+            id = 1,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_600_000
+        ).copy(travelLegStatus = "ARRIVED", actualArrivalMillis = 5_000_000)
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "To warehouse",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "SG",
+                destinationCity = "Singapore",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                journeyStatus = "IN_PROGRESS",
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(first)
+        )
+        assertEquals(true, journey.bookedLegsSettled)
+        assertEquals(true, journey.stillTravelingAfterBookedLegs)
+        assertEquals("SIN", journey.lastSettledArrivalLabel)
+    }
+
     private fun flight(
         id: Long,
         departure: String,
