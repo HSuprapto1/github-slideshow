@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -74,9 +76,6 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
-import com.roamatlas.presentation.theme.DemoData
-import com.roamatlas.presentation.theme.UncertainLocation
-import com.roamatlas.presentation.theme.VerifiedLocation
 import java.time.ZoneId
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -211,12 +210,18 @@ fun MapScreenV2(
             } else if (uiState.locations.isEmpty()) {
                 EmptyMapView()
             } else {
+                val selectedBottomPad = when {
+                    uiState.selectedLocation?.photoUri.isNullOrBlank().not() -> 360.dp
+                    uiState.selectedLocation != null -> 180.dp
+                    else -> 0.dp
+                }
                 GoogleMap(
                     modifier = Modifier.fillMaxSize(),
                     cameraPositionState = cameraPositionState,
+                    contentPadding = PaddingValues(bottom = selectedBottomPad),
                     properties = MapProperties(
                         mapType = mapType,
-                        isMyLocationEnabled = false
+                        isMyLocationEnabled = uiState.hasLocationPermission
                     ),
                     uiSettings = MapUiSettings(
                         zoomControlsEnabled = true,
@@ -232,7 +237,11 @@ fun MapScreenV2(
                     }
                 ) {
                     val displayLocations = if (uiState.locations.size > 1000) {
-                        uiState.locations.filterIndexed { index, _ -> index % (uiState.locations.size / 1000) == 0 }
+                        val step = (uiState.locations.size / 1000).coerceAtLeast(1)
+                        uiState.locations.filterIndexed { index, location ->
+                            index % step == 0 ||
+                                locationIdMatches(location, uiState.selectedLocation)
+                        }
                     } else {
                         uiState.locations
                     }
@@ -248,10 +257,15 @@ fun MapScreenV2(
                             width = 7f
                         )
                     }
-                    
-                    displayLocations.forEach { location ->
+
+                    // Draw selected pin last so it sits on top of nearby markers.
+                    val ordered = displayLocations.sortedBy {
+                        it.id == uiState.selectedLocation?.id
+                    }
+                    ordered.forEach { location ->
                         LocationMapMarker(
                             location = location,
+                            isSelected = location.id == uiState.selectedLocation?.id,
                             onClick = { viewModel.selectLocation(location) }
                         )
                     }
@@ -322,21 +336,25 @@ fun MapScreenV2(
                             else -> 0.dp
                         }
                     ),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.End
             ) {
-                FloatingActionButton(
-                    onClick = {
-                        viewModel.centerOnLocation(
-                            uiState.mapCenterLat,
-                            uiState.mapCenterLng,
-                            uiState.mapZoom
-                        )
-                    },
+                SmallFloatingActionButton(
+                    onClick = { viewModel.fitAllLocations() },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ) {
                     Icon(
                         imageVector = Icons.Default.GpsFixed,
-                        contentDescription = "Center on locations"
+                        contentDescription = "Fit all locations"
+                    )
+                }
+                FloatingActionButton(
+                    onClick = { viewModel.centerOnCurrentGps() },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = "Center on current GPS"
                     )
                 }
             }
@@ -510,34 +528,55 @@ private fun FilterBar(
 @Composable
 private fun LocationMapMarker(
     location: LocationRecord,
+    isSelected: Boolean,
     onClick: () -> Unit
 ) {
     val hasPhoto = !location.photoUri.isNullOrBlank()
-    val markerColor = when (location.source) {
-        LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
-        LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
-        LocationSource.MANUAL_ENTRY -> BitmapDescriptorFactory.HUE_ORANGE
+    val markerColor = when {
+        isSelected -> BitmapDescriptorFactory.HUE_YELLOW
+        location.source == LocationSource.GPS_TRACKING -> BitmapDescriptorFactory.HUE_BLUE
+        location.source == LocationSource.GOOGLE_TIMELINE -> BitmapDescriptorFactory.HUE_GREEN
+        else -> BitmapDescriptorFactory.HUE_ORANGE
     }
     val markerIcon = if (hasPhoto) {
-        rememberPhotoMarkerIcon(location.photoUri)
+        rememberPhotoMarkerIcon(
+            photoUri = location.photoUri,
+            size = if (isSelected) 56.dp else 44.dp,
+            selected = isSelected
+        )
     } else {
         BitmapDescriptorFactory.defaultMarker(markerColor)
     }
+    val markerState = remember(location.id) {
+        MarkerState(position = LatLng(location.latitude, location.longitude))
+    }
+    LaunchedEffect(location.latitude, location.longitude) {
+        markerState.position = LatLng(location.latitude, location.longitude)
+    }
+    LaunchedEffect(isSelected) {
+        if (isSelected) markerState.showInfoWindow() else markerState.hideInfoWindow()
+    }
 
     Marker(
-        state = MarkerState(position = LatLng(location.latitude, location.longitude)),
+        state = markerState,
         title = buildString {
             if (hasPhoto) append("Photo · ")
             append(location.city ?: formatTimestamp(location.timestamp))
         },
         snippet = "${location.source.name} - ${formatDate(location.timestamp)}",
         icon = markerIcon,
+        zIndex = if (isSelected) 10f else 0f,
         onClick = {
             onClick()
             true
         }
     )
 }
+
+private fun locationIdMatches(
+    location: LocationRecord,
+    selected: LocationRecord?
+): Boolean = selected != null && location.id == selected.id
 
 @Composable
 private fun LocationDetailCard(

@@ -25,29 +25,36 @@ private val photoMarkerCache = ConcurrentHashMap<String, BitmapDescriptor>()
 @Composable
 fun rememberPhotoMarkerIcon(
     photoUri: String?,
-    size: Dp = 44.dp
+    size: Dp = 44.dp,
+    selected: Boolean = false
 ): BitmapDescriptor {
     val context = LocalContext.current
     val sizePx = with(LocalDensity.current) { size.roundToPx() }
-    return remember(photoUri, sizePx) {
+    val borderColor = if (selected) 0xFFFFC107.toInt() else 0xFFFFFFFF.toInt()
+    return remember(photoUri, sizePx, selected) {
         photoUri
             ?.takeIf { it.isNotBlank() }
             ?.let { uri ->
-                val cacheKey = "$uri@$sizePx"
-                photoMarkerCache[cacheKey] ?: createPhotoMarkerDescriptor(context, uri, sizePx)
-                    ?.also { photoMarkerCache[cacheKey] = it }
+                val cacheKey = "$uri@$sizePx@$borderColor"
+                photoMarkerCache[cacheKey]
+                    ?: createPhotoMarkerDescriptor(context, uri, sizePx, borderColor)
+                        ?.also { photoMarkerCache[cacheKey] = it }
             }
-            ?: BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET)
+            ?: BitmapDescriptorFactory.defaultMarker(
+                if (selected) BitmapDescriptorFactory.HUE_YELLOW
+                else BitmapDescriptorFactory.HUE_VIOLET
+            )
     }
 }
 
 internal fun createPhotoMarkerDescriptor(
     context: Context,
     photoUri: String,
-    sizePx: Int
+    sizePx: Int,
+    borderColor: Int = 0xFFFFFFFF.toInt()
 ): BitmapDescriptor? {
     val source = decodePhotoBitmap(context, photoUri, sizePx) ?: return null
-    val pin = buildPhotoPinBitmap(source, sizePx)
+    val pin = buildPhotoPinBitmap(source, sizePx, borderColor)
     if (source !== pin) source.recycle()
     return BitmapDescriptorFactory.fromBitmap(pin)
 }
@@ -112,9 +119,13 @@ private fun scaleCenterCrop(source: Bitmap, sizePx: Int): Bitmap {
 }
 
 /**
- * Rounded photo square with a white border and a small pointer tip, suitable as a map pin.
+ * Rounded photo square with a border and a small pointer tip, suitable as a map pin.
  */
-private fun buildPhotoPinBitmap(photo: Bitmap, photoSizePx: Int): Bitmap {
+private fun buildPhotoPinBitmap(
+    photo: Bitmap,
+    photoSizePx: Int,
+    borderColor: Int = 0xFFFFFFFF.toInt()
+): Bitmap {
     val border = (photoSizePx * 0.08f).toInt().coerceAtLeast(2)
     val tipHeight = (photoSizePx * 0.28f).toInt().coerceAtLeast(8)
     val width = photoSizePx + border * 2
@@ -127,7 +138,7 @@ private fun buildPhotoPinBitmap(photo: Bitmap, photoSizePx: Int): Bitmap {
         style = Paint.Style.FILL
     }
     val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()
+        color = borderColor
         style = Paint.Style.FILL
     }
     val photoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)

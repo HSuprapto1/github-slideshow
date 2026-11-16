@@ -1,11 +1,21 @@
 package com.roamatlas.presentation.screens.map
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +25,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -38,28 +49,36 @@ data class MapUiState(
     val mapZoom: Float = 2f,
     /** Bumped when the camera must re-center even if lat/lng/zoom values are unchanged. */
     val cameraFocusToken: Int = 0,
+    val hasLocationPermission: Boolean = false,
     val countryCodes: List<String> = emptyList(),
     val totalLocations: Int = 0
 )
 
 @HiltViewModel
 class MapViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val locationRepository: LocationRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(MapUiState())
+    private val _uiState = MutableStateFlow(
+        MapUiState(hasLocationPermission = hasLocationPermission())
+    )
     val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
     private var locationsJob: Job? = null
+    private var hasAppliedInitialCamera = false
 
     init {
-        loadLocations()
+        loadLocations(recenterMode = RecenterMode.INITIAL_GPS)
         loadCountryCodes()
     }
 
-    private fun loadLocations() {
+    private fun loadLocations(recenterMode: RecenterMode = RecenterMode.NONE) {
         locationsJob?.cancel()
         locationsJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                hasLocationPermission = hasLocationPermission()
+            )
 
             val startDate = _uiState.value.filterStartDate
             val endDate = _uiState.value.filterEndDate
@@ -99,6 +118,7 @@ class MapViewModel @Inject constructor(
                 flowOf(emptyList())
             }
 
+            var firstEmission = true
             combine(sampleFlow, photoFlow) { samplePair, photoLocations ->
                 val (total, sampleLocations) = samplePair
                 val filteredSample = sampleLocations.filter { location ->
@@ -111,17 +131,96 @@ class MapViewModel @Inject constructor(
                 }
                 total to merged.values.sortedBy { it.timestamp }
             }.collect { (total, locations) ->
-                val center = calculateCenter(locations)
-                _uiState.value = _uiState.value.copy(
-                    locations = locations,
-                    totalLocations = total,
-                    mapCenterLat = center.first,
-                    mapCenterLng = center.second,
-                    mapZoom = if (locations.isEmpty()) 2f else calculateZoom(locations),
-                    isLoading = false
-                )
+                val mode = when {
+                    firstEmission && recenterMode != RecenterMode.NONE -> recenterMode
+                    firstEmission && !hasAppliedInitialCamera -> RecenterMode.INITIAL_GPS
+                    else -> RecenterMode.NONE
+                }
+                firstEmission = false
+                applyLocations(locations, total, mode)
             }
         }
+    }
+
+    private suspend fun applyLocations(
+        locations: List<LocationRecord>,
+        total: Int,
+        recenterMode: RecenterMode
+    ) {
+        val base = _uiState.value.copy(
+            locations = locations,
+            totalLocations = total,
+            isLoading = false,
+            hasLocationPermission = hasLocationPermission()
+        )
+        if (recenterMode == RecenterMode.NONE) {
+            _uiState.value = base
+            return
+        }
+
+        val camera = when (recenterMode) {
+            RecenterMode.INITIAL_GPS -> resolveInitialCamera(locations)
+            RecenterMode.FIT_LOCATIONS -> {
+                val center = calculateCenter(locations)
+                Triple(
+                    center.first,
+                    center.second,
+                    if (locations.isEmpty()) 2f else calculateZoom(locations)
+                )
+            }
+            RecenterMode.NONE -> Triple(base.mapCenterLat, base.mapCenterLng, base.mapZoom)
+        }
+        hasAppliedInitialCamera = true
+        _uiState.value = base.copy(
+            mapCenterLat = camera.first,
+            mapCenterLng = camera.second,
+            mapZoom = camera.third,
+            cameraFocusToken = base.cameraFocusToken + 1
+        )
+    }
+
+    private suspend fun resolveInitialCamera(
+        locations: List<LocationRecord>
+    ): Triple<Double, Double, Float> {
+        readDeviceLocation()?.let { device ->
+            return Triple(device.latitude, device.longitude, CURRENT_GPS_ZOOM)
+        }
+        locations.maxByOrNull { it.timestamp }?.let { latest ->
+            return Triple(latest.latitude, latest.longitude, CURRENT_GPS_ZOOM)
+        }
+        if (locations.isEmpty()) return Triple(0.0, 0.0, 2f)
+        val center = calculateCenter(locations)
+        return Triple(center.first, center.second, calculateZoom(locations))
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun readDeviceLocation(): Location? {
+        if (!hasLocationPermission()) return null
+        return runCatching {
+            val client = LocationServices.getFusedLocationProviderClient(context)
+            val cancellation = CancellationTokenSource()
+            val current = try {
+                client.getCurrentLocation(
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    cancellation.token
+                ).await()
+            } catch (_: Exception) {
+                null
+            }
+            current ?: client.lastLocation.await()
+        }.getOrNull()
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
     }
 
     private fun matchesSourceFilter(
@@ -148,7 +247,17 @@ class MapViewModel @Inject constructor(
     }
 
     fun selectLocation(location: LocationRecord?) {
-        _uiState.value = _uiState.value.copy(selectedLocation = location)
+        if (location == null) {
+            _uiState.value = _uiState.value.copy(selectedLocation = null)
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedLocation = location,
+            mapCenterLat = location.latitude,
+            mapCenterLng = location.longitude,
+            mapZoom = max(_uiState.value.mapZoom, PIN_FOCUS_ZOOM),
+            cameraFocusToken = _uiState.value.cameraFocusToken + 1
+        )
     }
 
     fun setDateFilter(startDate: LocalDate?, endDate: LocalDate?) {
@@ -156,7 +265,7 @@ class MapViewModel @Inject constructor(
             filterStartDate = startDate,
             filterEndDate = endDate
         )
-        loadLocations()
+        loadLocations(recenterMode = RecenterMode.FIT_LOCATIONS)
     }
 
     fun showLocalDate(
@@ -184,15 +293,7 @@ class MapViewModel @Inject constructor(
                 val filtered = locations.filter {
                     matchesSourceFilter(it, showGps, showTimeline, showPhoto)
                 }
-                val center = calculateCenter(filtered)
-                _uiState.value = _uiState.value.copy(
-                    locations = filtered,
-                    totalLocations = filtered.size,
-                    mapCenterLat = center.first,
-                    mapCenterLng = center.second,
-                    mapZoom = if (filtered.isEmpty()) 2f else calculateZoom(filtered),
-                    isLoading = false
-                )
+                applyLocations(filtered, filtered.size, RecenterMode.FIT_LOCATIONS)
             }
         }
     }
@@ -209,6 +310,7 @@ class MapViewModel @Inject constructor(
                 return@launch
             }
             val date = focused.timestamp.atZone(ZoneId.systemDefault()).toLocalDate()
+            hasAppliedInitialCamera = true
             // Single pin only — do not load other photos or the day's GPS track.
             _uiState.value = _uiState.value.copy(
                 filterStartDate = date,
@@ -231,7 +333,7 @@ class MapViewModel @Inject constructor(
 
     fun setCountryFilter(countryCode: String?) {
         _uiState.value = _uiState.value.copy(filterCountryCode = countryCode)
-        loadLocations()
+        loadLocations(recenterMode = RecenterMode.FIT_LOCATIONS)
     }
 
     fun setSourceFilters(
@@ -249,7 +351,7 @@ class MapViewModel @Inject constructor(
             showTimeline = nextTimeline,
             showPhoto = nextPhoto
         )
-        loadLocations()
+        loadLocations(recenterMode = RecenterMode.FIT_LOCATIONS)
     }
 
     fun clearFilters() {
@@ -262,7 +364,7 @@ class MapViewModel @Inject constructor(
             showPhoto = true,
             showTrackLines = false
         )
-        loadLocations()
+        loadLocations(recenterMode = RecenterMode.INITIAL_GPS)
     }
 
     fun setShowTrackLines(show: Boolean) {
@@ -279,6 +381,33 @@ class MapViewModel @Inject constructor(
             mapCenterLng = lng,
             mapZoom = zoom,
             cameraFocusToken = _uiState.value.cameraFocusToken + 1
+        )
+    }
+
+    fun centerOnCurrentGps() {
+        viewModelScope.launch {
+            val device = readDeviceLocation()
+            if (device != null) {
+                centerOnLocation(device.latitude, device.longitude, CURRENT_GPS_ZOOM)
+                return@launch
+            }
+            val latest = _uiState.value.locations.maxByOrNull { it.timestamp }
+            if (latest != null) {
+                centerOnLocation(latest.latitude, latest.longitude, CURRENT_GPS_ZOOM)
+            }
+        }
+    }
+
+    fun fitAllLocations() {
+        val locations = _uiState.value.locations
+        if (locations.isEmpty()) return
+        val center = calculateCenter(locations)
+        centerOnLocation(center.first, center.second, calculateZoom(locations))
+    }
+
+    fun refreshLocationPermission() {
+        _uiState.value = _uiState.value.copy(
+            hasLocationPermission = hasLocationPermission()
         )
     }
 
@@ -306,8 +435,16 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    private enum class RecenterMode {
+        NONE,
+        INITIAL_GPS,
+        FIT_LOCATIONS
+    }
+
     companion object {
         private const val MAX_MAP_POINTS = 5_000
         private const val PHOTO_FOCUS_ZOOM = 16f
+        private const val PIN_FOCUS_ZOOM = 15f
+        private const val CURRENT_GPS_ZOOM = 14f
     }
 }
