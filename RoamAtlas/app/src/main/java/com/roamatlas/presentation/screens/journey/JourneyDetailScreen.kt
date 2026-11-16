@@ -88,6 +88,7 @@ import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
 import com.roamatlas.data.journey.JourneyWithFlights
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.JourneyStatus
 import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.presentation.components.PhotoAttachmentSection
@@ -174,6 +175,15 @@ fun JourneyDetailScreen(
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
                 item { JourneyHeader(value, state.nowMillis) }
+                item {
+                    JourneyStatusActions(
+                        journey = value,
+                        onMarkCompleted = viewModel::markJourneyCompleted,
+                        onMarkCancelled = viewModel::markJourneyCancelled,
+                        onMarkInProgress = viewModel::markJourneyInProgress,
+                        onMarkPlanned = viewModel::markJourneyPlanned
+                    )
+                }
                 if (value.journey.notes != null) {
                     item {
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -437,12 +447,11 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
         journey.journey.endDateEpochDay ?: journey.journey.startDateEpochDay
     )
     val dateFmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-    val status = when {
-        journey.isPast -> "Past"
-        first != null && now < first -> "Upcoming"
-        else -> "In progress"
-    }
+    val status = JourneyStatus.label(journey.status)
     val headline = when {
+        journey.isCancelled ->
+            journey.journey.cancelReason?.let { "Cancelled · $it" } ?: "Cancelled"
+        journey.isCompleted -> "Journey completed"
         journey.orderedFlights.isEmpty() -> "Trip shell · add your first leg"
         first != null && now < first ->
             "Departs in ${formatDuration((first - now) / 60_000)}"
@@ -451,7 +460,7 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                 formatDuration(
                     ((nextFlight.estimatedDepartureTimeMillis ?: nextFlight.departureTimeMillis) - now) / 60_000
                 )
-        journey.isPast -> "Past journey · completed"
+        journey.isPast -> "Past journey"
         else -> "Journey in progress"
     }
     Card(
@@ -476,7 +485,11 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                 )
             }
             AssistChip(onClick = {}, enabled = false, label = { Text(status) })
-            Text(headline, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(
+                headline,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
             Text(
                 if (start == end) start.format(dateFmt) else "${start.format(dateFmt)} – ${end.format(dateFmt)}",
                 style = MaterialTheme.typography.titleMedium
@@ -494,6 +507,91 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
             }
             Text(journey.legSummaryText, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+@Composable
+private fun JourneyStatusActions(
+    journey: JourneyWithFlights,
+    onMarkCompleted: () -> Unit,
+    onMarkCancelled: (String?) -> Unit,
+    onMarkInProgress: () -> Unit,
+    onMarkPlanned: () -> Unit
+) {
+    var showCancelDialog by remember { mutableStateOf(false) }
+    var cancelReason by remember { mutableStateOf("") }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Journey status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Mark completed when you finish the trip, or cancelled even if you were already at the airport. " +
+                    "Airport auto-detect comes later — these actions work now.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!journey.isCompleted) {
+                    Button(
+                        onClick = onMarkCompleted,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Completed") }
+                }
+                if (!journey.isCancelled) {
+                    OutlinedButton(
+                        onClick = { showCancelDialog = true },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Cancelled") }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onMarkInProgress,
+                    modifier = Modifier.weight(1f)
+                ) { Text("In progress") }
+                OutlinedButton(
+                    onClick = onMarkPlanned,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Planned") }
+            }
+        }
+    }
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            title = { Text("Cancel this journey?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("It will move to Past and won’t count as travelled.")
+                    OutlinedTextField(
+                        value = cancelReason,
+                        onValueChange = { cancelReason = it },
+                        label = { Text("Reason (optional)") },
+                        placeholder = { Text("Airline cancel, rebooked, personal…") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCancelDialog = false
+                        onMarkCancelled(cancelReason)
+                    }
+                ) { Text("Cancel journey") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) { Text("Keep") }
+            }
+        )
     }
 }
 

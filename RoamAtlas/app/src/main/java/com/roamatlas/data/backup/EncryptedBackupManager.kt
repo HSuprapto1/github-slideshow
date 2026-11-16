@@ -10,6 +10,7 @@ import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.entity.DayTrackerEntity
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.LocationEntity
+import com.roamatlas.data.local.entity.MapPlaceEntity
 import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TripEntity
 import com.roamatlas.data.local.entity.UserSettingsEntity
@@ -396,6 +397,9 @@ class EncryptedBackupManager @Inject constructor(
         val settings = database.userSettingsDao().getAllSettingsSnapshot()
         writer.name("settings")
         gson.toJson(settings, List::class.java, writer)
+        val mapPlaces = database.mapPlaceDao().getAllSnapshot()
+        writer.name("mapPlaces")
+        gson.toJson(mapPlaces, List::class.java, writer)
         writer.endObject()
         onProgress(BackupProgress("Database export ready", 92))
         return BackupResult(locations, flights, trackers.size, trips.size, settings.size)
@@ -420,6 +424,7 @@ class EncryptedBackupManager @Inject constructor(
             database.dayTrackerDao().deleteAll()
             database.tripDao().deleteAll()
             database.userSettingsDao().deleteAll()
+            database.mapPlaceDao().deleteAll()
 
             reader.beginObject()
             while (reader.hasNext()) {
@@ -506,6 +511,21 @@ class EncryptedBackupManager @Inject constructor(
                         database.userSettingsDao().setSettings(values)
                         settings = values.size
                     }
+                    "mapPlaces" -> {
+                        onProgress(BackupProgress("Restoring saved places…", 99))
+                        reader.beginArray()
+                        while (reader.hasNext()) {
+                            val place: MapPlaceEntity =
+                                gson.fromJson(reader, MapPlaceEntity::class.java)
+                            database.mapPlaceDao().insert(
+                                place.copy(
+                                    id = 0,
+                                    name = nonNullString(place.name, "Saved place")
+                                )
+                            )
+                        }
+                        reader.endArray()
+                    }
                     else -> reader.skipValue()
                 }
             }
@@ -548,7 +568,8 @@ class EncryptedBackupManager @Inject constructor(
     /** Gson can leave Kotlin non-null fields as null — sanitize before Room insert. */
     private fun sanitizeLocation(entity: LocationEntity): LocationEntity = entity.copy(
         source = nonNullString(entity.source, "BACKUP"),
-        confidence = nonNullString(entity.confidence, "UNKNOWN")
+        confidence = nonNullString(entity.confidence, "UNKNOWN"),
+        isAirborne = entity.isAirborne
     )
 
     private fun sanitizeFlight(entity: FlightEntity): FlightEntity = entity.copy(
@@ -567,7 +588,8 @@ class EncryptedBackupManager @Inject constructor(
     )
 
     private fun sanitizeTrip(entity: TripEntity): TripEntity = entity.copy(
-        name = nonNullString(entity.name, "Journey")
+        name = nonNullString(entity.name, "Journey"),
+        journeyStatus = nonNullString(entity.journeyStatus, "PLANNED")
     )
 
     private fun sanitizeSetting(entity: UserSettingsEntity): UserSettingsEntity = entity.copy(

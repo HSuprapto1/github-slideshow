@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.roamatlas.data.local.entity.MapPlaceEntity
+import com.roamatlas.data.repository.MapPlaceRepository
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
 import com.roamatlas.domain.repository.LocationRepository
@@ -42,6 +44,10 @@ data class MapUiState(
     val showPhoto: Boolean = true,
     /** Connecting lines between GPS/timeline points. Off by default to reduce map clutter. */
     val showTrackLines: Boolean = false,
+    val showSavedPlaces: Boolean = true,
+    val savedPlaces: List<MapPlaceEntity> = emptyList(),
+    val selectedSavedPlace: MapPlaceEntity? = null,
+    val placeSaveMessage: String? = null,
     val showFilters: Boolean = false,
     val isLoading: Boolean = true,
     val mapCenterLat: Double = 0.0,
@@ -57,7 +63,8 @@ data class MapUiState(
 @HiltViewModel
 class MapViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val locationRepository: LocationRepository
+    private val locationRepository: LocationRepository,
+    private val mapPlaceRepository: MapPlaceRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -70,6 +77,11 @@ class MapViewModel @Inject constructor(
     init {
         loadLocations(recenterMode = RecenterMode.INITIAL_GPS)
         loadCountryCodes()
+        viewModelScope.launch {
+            mapPlaceRepository.getAll().collect { places ->
+                _uiState.value = _uiState.value.copy(savedPlaces = places)
+            }
+        }
     }
 
     private fun loadLocations(recenterMode: RecenterMode = RecenterMode.NONE) {
@@ -253,11 +265,60 @@ class MapViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(
             selectedLocation = location,
+            selectedSavedPlace = null,
             mapCenterLat = location.latitude,
             mapCenterLng = location.longitude,
             mapZoom = max(_uiState.value.mapZoom, PIN_FOCUS_ZOOM),
             cameraFocusToken = _uiState.value.cameraFocusToken + 1
         )
+    }
+
+    fun selectSavedPlace(place: MapPlaceEntity?) {
+        if (place == null) {
+            _uiState.value = _uiState.value.copy(selectedSavedPlace = null)
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedSavedPlace = place,
+            selectedLocation = null,
+            mapCenterLat = place.latitude,
+            mapCenterLng = place.longitude,
+            mapZoom = max(_uiState.value.mapZoom, PIN_FOCUS_ZOOM),
+            cameraFocusToken = _uiState.value.cameraFocusToken + 1
+        )
+    }
+
+    fun saveSelectedAsPlace(name: String) {
+        val location = _uiState.value.selectedLocation ?: return
+        viewModelScope.launch {
+            mapPlaceRepository.savePlace(
+                name = name,
+                latitude = location.latitude,
+                longitude = location.longitude
+            )
+            _uiState.value = _uiState.value.copy(
+                placeSaveMessage = "Saved “${name.trim().ifBlank { "Saved place" }}” on the map."
+            )
+        }
+    }
+
+    fun deleteSelectedSavedPlace() {
+        val place = _uiState.value.selectedSavedPlace ?: return
+        viewModelScope.launch {
+            mapPlaceRepository.deletePlace(place.id)
+            _uiState.value = _uiState.value.copy(
+                selectedSavedPlace = null,
+                placeSaveMessage = "Removed saved place."
+            )
+        }
+    }
+
+    fun clearPlaceMessage() {
+        _uiState.value = _uiState.value.copy(placeSaveMessage = null)
+    }
+
+    fun setShowSavedPlaces(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showSavedPlaces = show)
     }
 
     fun setDateFilter(startDate: LocalDate?, endDate: LocalDate?) {
@@ -362,7 +423,8 @@ class MapViewModel @Inject constructor(
             showGps = true,
             showTimeline = true,
             showPhoto = true,
-            showTrackLines = false
+            showTrackLines = false,
+            showSavedPlaces = true
         )
         loadLocations(recenterMode = RecenterMode.INITIAL_GPS)
     }

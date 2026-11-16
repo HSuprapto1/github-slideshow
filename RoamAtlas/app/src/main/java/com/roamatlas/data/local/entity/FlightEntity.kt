@@ -83,6 +83,9 @@ data class TripEntity(
     val notes: String?,
     val coverPhotoUri: String?,
     val photoUrisJson: String?,
+    /** PLANNED, IN_PROGRESS, COMPLETED, CANCELLED — see [JourneyStatus]. */
+    val journeyStatus: String = JourneyStatus.PLANNED,
+    val cancelReason: String? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long
 )

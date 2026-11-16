@@ -9,6 +9,7 @@ import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.dao.DayTrackerDao
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.LocationDao
+import com.roamatlas.data.local.dao.MapPlaceDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.dao.UserSettingsDao
 import dagger.Module
@@ -118,6 +119,46 @@ object DatabaseModule {
             )
         }
     }
+
+    private val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `locations` ADD COLUMN `isAirborne` INTEGER NOT NULL DEFAULT 0"
+            )
+            db.execSQL(
+                "ALTER TABLE `trips` ADD COLUMN `journeyStatus` TEXT NOT NULL DEFAULT 'PLANNED'"
+            )
+            db.execSQL("ALTER TABLE `trips` ADD COLUMN `cancelReason` TEXT")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `map_places` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `name` TEXT NOT NULL,
+                    `latitude` REAL NOT NULL,
+                    `longitude` REAL NOT NULL,
+                    `radiusMeters` REAL,
+                    `notes` TEXT,
+                    `createdAtMillis` INTEGER NOT NULL,
+                    `updatedAtMillis` INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_map_places_name` ON `map_places` (`name`)"
+            )
+            db.execSQL(
+                """
+                UPDATE locations SET isAirborne = 1
+                WHERE IFNULL(isAirborne, 0) = 0
+                  AND (
+                    altitude >= 6000
+                    OR (altitude >= 2500 AND speed >= 40)
+                    OR speed >= 70
+                  )
+                """.trimIndent()
+            )
+        }
+    }
     
     @Provides
     @Singleton
@@ -132,7 +173,8 @@ object DatabaseModule {
                 MIGRATION_2_3,
                 MIGRATION_3_4,
                 MIGRATION_4_5,
-                MIGRATION_5_6
+                MIGRATION_5_6,
+                MIGRATION_6_7
             )
             .build()
     }
@@ -160,6 +202,11 @@ object DatabaseModule {
     @Provides
     fun provideUserSettingsDao(database: RoamAtlasDatabase): UserSettingsDao {
         return database.userSettingsDao()
+    }
+
+    @Provides
+    fun provideMapPlaceDao(database: RoamAtlasDatabase): MapPlaceDao {
+        return database.mapPlaceDao()
     }
     
     @Provides

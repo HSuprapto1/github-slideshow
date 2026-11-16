@@ -3,6 +3,7 @@ package com.roamatlas
 import android.app.Application
 import android.util.Log
 import com.roamatlas.data.flight.FlightReminderManager
+import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.photo.MissingPhotoCleaner
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -19,10 +20,15 @@ class RoamAtlasApplication : Application() {
     @Inject
     lateinit var missingPhotoCleaner: MissingPhotoCleaner
 
+    @Inject
+    lateinit var locationDao: LocationDao
+
     override fun onCreate() {
         super.onCreate()
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             flightReminderManager.startServiceIfEnabled()
+            runCatching { locationDao.markLikelyAirborneFromSensors() }
+                .onFailure { Log.w(TAG, "Airborne backfill failed", it) }
             runCatching { missingPhotoCleaner.cleanup() }
                 .onSuccess { result ->
                     if (!result.isEmpty) {

@@ -6,6 +6,7 @@ import android.net.Uri
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.JourneyStatus
 import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TripEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -98,8 +99,18 @@ data class JourneyWithFlights(
             add("$journeyDayCount day${if (journeyDayCount == 1) "" else "s"}")
         }.joinToString(" · ").ifBlank { "$journeyDayCount days" }
 
+    val status: String
+        get() = JourneyStatus.normalize(journey.journeyStatus)
+
+    val isCancelled: Boolean
+        get() = status == JourneyStatus.CANCELLED
+
+    val isCompleted: Boolean
+        get() = status == JourneyStatus.COMPLETED
+
     val isPast: Boolean
         get() {
+            if (isCancelled || isCompleted) return true
             val zone = ZoneId.systemDefault()
             val endDay = journey.endDateEpochDay
             if (endDay != null) {
@@ -210,6 +221,8 @@ class JourneyRepository @Inject constructor(
                 notes = notes.ifBlank { null },
                 coverPhotoUri = null,
                 photoUrisJson = null,
+                journeyStatus = JourneyStatus.PLANNED,
+                cancelReason = null,
                 createdAtMillis = now,
                 updatedAtMillis = now
             )
@@ -256,6 +269,26 @@ class JourneyRepository @Inject constructor(
                 notes = notes.ifBlank { null },
                 startDateEpochDay = start,
                 endDateEpochDay = end,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun setJourneyStatus(
+        journeyId: Long,
+        status: String,
+        cancelReason: String? = null
+    ) {
+        val journey = tripDao.getById(journeyId) ?: return
+        val normalized = JourneyStatus.normalize(status)
+        tripDao.update(
+            journey.copy(
+                journeyStatus = normalized,
+                cancelReason = if (normalized == JourneyStatus.CANCELLED) {
+                    cancelReason?.takeIf { it.isNotBlank() } ?: journey.cancelReason
+                } else {
+                    null
+                },
                 updatedAtMillis = System.currentTimeMillis()
             )
         )

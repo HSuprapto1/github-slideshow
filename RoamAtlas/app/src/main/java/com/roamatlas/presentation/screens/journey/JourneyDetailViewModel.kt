@@ -204,6 +204,40 @@ class JourneyDetailViewModel @Inject constructor(
         }
     }
 
+    fun markJourneyCompleted() {
+        viewModelScope.launch {
+            journeyRepository.setJourneyStatus(journeyId, "COMPLETED")
+            _uiState.value = _uiState.value.copy(message = "Journey marked completed.")
+        }
+    }
+
+    fun markJourneyCancelled(reason: String?) {
+        viewModelScope.launch {
+            journeyRepository.setJourneyStatus(
+                journeyId = journeyId,
+                status = "CANCELLED",
+                cancelReason = reason
+            )
+            _uiState.value = _uiState.value.copy(
+                message = "Journey cancelled. It stays in Past and is not counted as travelled."
+            )
+        }
+    }
+
+    fun markJourneyPlanned() {
+        viewModelScope.launch {
+            journeyRepository.setJourneyStatus(journeyId, "PLANNED")
+            _uiState.value = _uiState.value.copy(message = "Journey set back to planned.")
+        }
+    }
+
+    fun markJourneyInProgress() {
+        viewModelScope.launch {
+            journeyRepository.setJourneyStatus(journeyId, "IN_PROGRESS")
+            _uiState.value = _uiState.value.copy(message = "Journey marked in progress.")
+        }
+    }
+
     fun deleteJourney() {
         viewModelScope.launch {
             journeyRepository.deleteJourney(journeyId)

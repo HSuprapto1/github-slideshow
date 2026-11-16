@@ -29,6 +29,7 @@ fun LocationEntity.toDomain(): LocationRecord {
         notes = notes,
         photoUri = photoUri,
         originalPhotoUri = originalPhotoUri,
+        isAirborne = isAirborne,
         createdAt = Instant.ofEpochMilli(createdAtMillis),
         updatedAt = Instant.ofEpochMilli(updatedAtMillis)
     )
@@ -52,6 +53,7 @@ fun LocationRecord.toEntity(): LocationEntity {
         notes = notes,
         photoUri = photoUri,
         originalPhotoUri = originalPhotoUri,
+        isAirborne = isAirborne,
         createdAtMillis = createdAt.toEpochMilli(),
         updatedAtMillis = updatedAt.toEpochMilli()
     )

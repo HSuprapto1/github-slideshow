@@ -107,6 +107,7 @@ class DashboardViewModelV2 @Inject constructor(
                     val trackerResults = calculateTrackerResults(trackers)
                     val countries = TravelStatisticsRepository.getAllCountries()
                     val upcomingJourney = data.journeys
+                        .filterNot { it.isCancelled || it.isCompleted || it.isPast }
                         .filter { (it.finalArrivalMillis ?: Long.MIN_VALUE) >= data.now }
                         .minByOrNull { it.firstDepartureMillis ?: Long.MAX_VALUE }
                     val today = LocalDate.now()

@@ -84,7 +84,13 @@ interface LocationDao {
     @Query("SELECT * FROM locations WHERE countryCode = :countryCode ORDER BY timestampMillis ASC")
     fun getLocationsByCountry(countryCode: String): Flow<List<LocationEntity>>
     
-    @Query("SELECT DISTINCT countryCode FROM locations WHERE countryCode IS NOT NULL")
+    @Query(
+        """
+        SELECT DISTINCT countryCode FROM locations
+        WHERE countryCode IS NOT NULL
+          AND IFNULL(isAirborne, 0) = 0
+        """
+    )
     fun getDistinctCountryCodes(): Flow<List<String>>
     
     @Query("SELECT COUNT(*) FROM locations")
@@ -325,6 +331,7 @@ interface LocationDao {
                MIN(timestampMillis) AS firstTimestamp, MAX(timestampMillis) AS lastTimestamp
         FROM locations
         WHERE countryCode IS NOT NULL
+          AND IFNULL(isAirborne, 0) = 0
         GROUP BY countryCode, countryName
         ORDER BY daysSpent DESC
     """)
@@ -343,6 +350,7 @@ interface LocationDao {
                COUNT(DISTINCT countryCode) AS countriesVisited
         FROM locations
         WHERE countryCode IS NOT NULL
+          AND IFNULL(isAirborne, 0) = 0
         GROUP BY year
         ORDER BY year DESC
     """)
@@ -388,6 +396,7 @@ interface LocationDao {
         FROM locations 
         WHERE countryCode = :countryCode 
         AND timestampMillis BETWEEN :startMillis AND :endMillis
+          AND IFNULL(isAirborne, 0) = 0
     """)
     suspend fun getDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): List<DayCountryResult>
     
@@ -399,6 +408,7 @@ interface LocationDao {
         FROM locations
         WHERE countryCode = :countryCode
           AND timestampMillis BETWEEN :startMillis AND :endMillis
+          AND IFNULL(isAirborne, 0) = 0
     """)
     suspend fun countDaysInCountry(countryCode: String, startMillis: Long, endMillis: Long): Int
 
@@ -411,6 +421,7 @@ interface LocationDao {
         WHERE countryCode IS NOT NULL
           AND countryCode != :countryCode
           AND timestampMillis BETWEEN :startMillis AND :endMillis
+          AND IFNULL(isAirborne, 0) = 0
     """)
     suspend fun countDaysOutsideCountry(
         countryCode: String,
@@ -427,12 +438,26 @@ interface LocationDao {
         WHERE countryCode IS NOT NULL
           AND countryCode != :countryCode
           AND timestampMillis BETWEEN :startMillis AND :endMillis
+          AND IFNULL(isAirborne, 0) = 0
     """)
     suspend fun getDaysOutsideCountry(
         countryCode: String,
         startMillis: Long,
         endMillis: Long
     ): List<String>
+
+    @Query(
+        """
+        UPDATE locations SET isAirborne = 1
+        WHERE IFNULL(isAirborne, 0) = 0
+          AND (
+            altitude >= 6000
+            OR (altitude >= 2500 AND speed >= 40)
+            OR speed >= 70
+          )
+        """
+    )
+    suspend fun markLikelyAirborneFromSensors()
 
     @Query("""
         SELECT DATE(

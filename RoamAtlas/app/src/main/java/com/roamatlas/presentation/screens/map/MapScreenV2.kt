@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,10 +44,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -69,6 +73,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
@@ -78,6 +83,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
+import com.roamatlas.data.local.entity.MapPlaceEntity
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.model.LocationSource
 import java.time.ZoneId
@@ -95,9 +101,12 @@ fun MapScreenV2(
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
     var mapLoaded by remember { mutableStateOf(false) }
     var fullscreenPhotoUri by remember { mutableStateOf<String?>(null) }
+    var showSavePlaceDialog by remember { mutableStateOf(false) }
+    var savePlaceName by remember { mutableStateOf("") }
 
     LaunchedEffect(initialLocationId, initialDate, initialCountryCode, initialCity) {
         when {
@@ -126,7 +135,13 @@ fun MapScreenV2(
         uiState.selectedLocation?.id
     ) {
         if (!mapLoaded) return@LaunchedEffect
-        if (uiState.locations.isEmpty() && uiState.selectedLocation == null) return@LaunchedEffect
+        if (uiState.locations.isEmpty() &&
+            uiState.selectedLocation == null &&
+            uiState.selectedSavedPlace == null &&
+            uiState.savedPlaces.isEmpty()
+        ) {
+            return@LaunchedEffect
+        }
         cameraPositionState.animate(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(uiState.mapCenterLat, uiState.mapCenterLng),
@@ -211,7 +226,7 @@ fun MapScreenV2(
                 ) {
                     CircularProgressIndicator()
                 }
-            } else if (uiState.locations.isEmpty()) {
+            } else if (uiState.locations.isEmpty() && uiState.savedPlaces.isEmpty()) {
                 EmptyMapView()
             } else {
                 val selectedBottomPad = when {
@@ -237,6 +252,7 @@ fun MapScreenV2(
                         // Keep the focused photo selected when opened from Photos.
                         if (initialLocationId == null) {
                             viewModel.selectLocation(null)
+                            viewModel.selectSavedPlace(null)
                         }
                     }
                 ) {
@@ -273,6 +289,16 @@ fun MapScreenV2(
                             onClick = { viewModel.selectLocation(location) }
                         )
                     }
+
+                    if (uiState.showSavedPlaces) {
+                        uiState.savedPlaces.forEach { place ->
+                            SavedPlaceMarker(
+                                place = place,
+                                isSelected = place.id == uiState.selectedSavedPlace?.id,
+                                onClick = { viewModel.selectSavedPlace(place) }
+                            )
+                        }
+                    }
                 }
             }
             
@@ -289,6 +315,7 @@ fun MapScreenV2(
                     showTimeline = uiState.showTimeline,
                     showPhoto = uiState.showPhoto,
                     showTrackLines = uiState.showTrackLines,
+                    showSavedPlaces = uiState.showSavedPlaces,
                     onCountrySelected = { viewModel.setCountryFilter(it) },
                     onSourceFilterChange = { gps, timeline, photo ->
                         viewModel.setSourceFilters(
@@ -298,6 +325,7 @@ fun MapScreenV2(
                         )
                     },
                     onTrackLinesChange = { viewModel.setShowTrackLines(it) },
+                    onSavedPlacesChange = { viewModel.setShowSavedPlaces(it) },
                     onClearFilters = { viewModel.clearFilters() }
                 )
             }
@@ -313,6 +341,10 @@ fun MapScreenV2(
                         location = location,
                         galleryStyle = !location.photoUri.isNullOrBlank(),
                         onOpenFullPhoto = { uri -> fullscreenPhotoUri = uri },
+                        onSavePlace = {
+                            savePlaceName = location.city ?: "Home"
+                            showSavePlaceDialog = true
+                        },
                         onClose = {
                             // Dismiss the photo sheet so the map/pin is visible.
                             viewModel.selectLocation(null)
@@ -320,6 +352,75 @@ fun MapScreenV2(
                         }
                     )
                 }
+            }
+
+            AnimatedVisibility(
+                visible = uiState.selectedSavedPlace != null,
+                enter = slideInVertically { it },
+                exit = slideOutVertically { it },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                uiState.selectedSavedPlace?.let { place ->
+                    SavedPlaceDetailCard(
+                        place = place,
+                        onOpenMaps = {
+                            openInGoogleMaps(
+                                context = context,
+                                latitude = place.latitude,
+                                longitude = place.longitude,
+                                label = place.name
+                            )
+                        },
+                        onDelete = viewModel::deleteSelectedSavedPlace,
+                        onClose = { viewModel.selectSavedPlace(null) }
+                    )
+                }
+            }
+
+            uiState.placeSaveMessage?.let { message ->
+                LaunchedEffect(message) {
+                    viewModel.clearPlaceMessage()
+                }
+                Text(
+                    text = message,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 72.dp)
+                        .background(
+                            MaterialTheme.colorScheme.secondaryContainer,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            if (showSavePlaceDialog) {
+                AlertDialog(
+                    onDismissRequest = { showSavePlaceDialog = false },
+                    title = { Text("Save place") },
+                    text = {
+                        OutlinedTextField(
+                            value = savePlaceName,
+                            onValueChange = { savePlaceName = it },
+                            label = { Text("Name") },
+                            placeholder = { Text("Home, Mom’s house, Office…") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveSelectedAsPlace(savePlaceName)
+                                showSavePlaceDialog = false
+                            }
+                        ) { Text("Save") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showSavePlaceDialog = false }) { Text("Cancel") }
+                    }
+                )
             }
 
             fullscreenPhotoUri?.let { uri ->
@@ -420,9 +521,11 @@ private fun FilterBar(
     showTimeline: Boolean,
     showPhoto: Boolean,
     showTrackLines: Boolean,
+    showSavedPlaces: Boolean,
     onCountrySelected: (String?) -> Unit,
     onSourceFilterChange: (Boolean, Boolean, Boolean) -> Unit,
     onTrackLinesChange: (Boolean) -> Unit,
+    onSavedPlacesChange: (Boolean) -> Unit,
     onClearFilters: () -> Unit
 ) {
     Surface(
@@ -500,9 +603,16 @@ private fun FilterBar(
                         label = { Text("Track lines") }
                     )
                 }
+                item {
+                    FilterChip(
+                        selected = showSavedPlaces,
+                        onClick = { onSavedPlacesChange(!showSavedPlaces) },
+                        label = { Text("Places") }
+                    )
+                }
             }
             Text(
-                text = "Track lines connect GPS/history points. Leave off for a clearer map.",
+                text = "Track lines connect GPS/history points. Places are saved favorites like Home.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -587,6 +697,7 @@ private fun LocationDetailCard(
     location: LocationRecord,
     galleryStyle: Boolean = false,
     onOpenFullPhoto: (String) -> Unit = {},
+    onSavePlace: () -> Unit = {},
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -720,6 +831,120 @@ private fun LocationDetailCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Open in Google Maps")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onSavePlace,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Save place")
+            }
+            if (location.isAirborne) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Airborne GPS · excluded from country visit counts",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedPlaceMarker(
+    place: MapPlaceEntity,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val markerState = remember(place.id) {
+        MarkerState(position = LatLng(place.latitude, place.longitude))
+    }
+    LaunchedEffect(place.latitude, place.longitude) {
+        markerState.position = LatLng(place.latitude, place.longitude)
+    }
+    LaunchedEffect(isSelected) {
+        if (isSelected) markerState.showInfoWindow() else markerState.hideInfoWindow()
+    }
+    place.radiusMeters?.takeIf { it > 0f }?.let { radius ->
+        Circle(
+            center = LatLng(place.latitude, place.longitude),
+            radius = radius.toDouble(),
+            fillColor = Color(0x33FFC107),
+            strokeColor = Color(0xFFFFC107),
+            strokeWidth = 2f
+        )
+    }
+    Marker(
+        state = markerState,
+        title = place.name,
+        snippet = "Saved place",
+        icon = BitmapDescriptorFactory.defaultMarker(
+            if (isSelected) BitmapDescriptorFactory.HUE_YELLOW
+            else BitmapDescriptorFactory.HUE_ORANGE
+        ),
+        zIndex = if (isSelected) 12f else 5f,
+        onClick = {
+            onClick()
+            true
+        }
+    )
+}
+
+@Composable
+private fun SavedPlaceDetailCard(
+    place: MapPlaceEntity,
+    onOpenMaps: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = place.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = String.format("%.5f, %.5f", place.latitude, place.longitude),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
+            place.notes?.takeIf { it.isNotBlank() }?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(onClick = onOpenMaps, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open in Google Maps")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+                Text("Remove saved place")
             }
         }
     }
