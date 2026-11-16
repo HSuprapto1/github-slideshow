@@ -52,6 +52,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
+import com.roamatlas.presentation.util.finalizeGalleryCameraPhoto
 
 /**
  * Photo attachment component for adding photos to flights, trips, or locations.
@@ -82,6 +83,7 @@ fun PhotoAttachmentSection(
     ) { saved ->
         val uri = pendingCameraUri
         if (saved && uri != null) {
+            finalizeGalleryCameraPhoto(context, uri)
             onAddPhoto(uri)
         } else if (uri != null) {
             runCatching { context.contentResolver.delete(uri, null, null) }

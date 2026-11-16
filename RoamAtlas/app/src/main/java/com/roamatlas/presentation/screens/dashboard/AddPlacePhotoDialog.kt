@@ -41,6 +41,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.roamatlas.data.photo.CapturedPhotoLocation
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
+import com.roamatlas.presentation.util.finalizeGalleryCameraPhoto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -91,7 +92,8 @@ fun AddPhotoToTimelineDialog(
     lastResultMessage: String?,
     onDismiss: () -> Unit,
     onImportGallery: (List<Uri>) -> Unit,
-    onImportCaptured: (Uri, CapturedPhotoLocation) -> Unit
+    onImportCaptured: (Uri, CapturedPhotoLocation) -> Unit,
+    onCaptureNeedsLocation: (Uri) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -140,6 +142,7 @@ fun AddPhotoToTimelineDialog(
             if (uri != null) runCatching { context.contentResolver.delete(uri, null, null) }
             return@rememberLauncherForActivityResult
         }
+        finalizeGalleryCameraPhoto(context, uri)
         waitingForLocation = true
         scope.launch {
             val capture = withContext(Dispatchers.IO) {
@@ -147,11 +150,8 @@ fun AddPhotoToTimelineDialog(
             }
             waitingForLocation = false
             if (capture == null) {
-                Toast.makeText(
-                    context,
-                    "Could not read GPS for this photo. Enable location and try again, or load a geotagged gallery photo.",
-                    Toast.LENGTH_LONG
-                ).show()
+                // Photo is already in Gallery; ask for a location so it still lands in Photos.
+                onCaptureNeedsLocation(uri)
                 return@launch
             }
             onImportCaptured(uri, capture)
@@ -229,9 +229,10 @@ fun AddPhotoToTimelineDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Load geotagged photos or take a new picture. RoamAtlas reads the GPS " +
-                        "position and adds a timeline point with a thumbnail, or links the photo " +
-                        "if a nearby point already exists.",
+                    "Load geotagged photos or take a new picture. Taken photos are saved to your " +
+                        "phone Gallery (Pictures/RoamAtlas). RoamAtlas keeps a thumbnail on the " +
+                        "timeline / Photos tab using GPS, or asks you to place the photo if GPS " +
+                        "is unavailable.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 if (isImporting || waitingForLocation) {

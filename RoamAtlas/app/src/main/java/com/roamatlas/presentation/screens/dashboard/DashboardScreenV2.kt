@@ -262,7 +262,8 @@ fun DashboardScreenV2(
             lastResultMessage = uiState.photoImportMessage,
             onDismiss = viewModel::hideAddPhotoDialog,
             onImportGallery = viewModel::importGalleryPhotos,
-            onImportCaptured = viewModel::importCapturedPhoto
+            onImportCaptured = viewModel::importCapturedPhoto,
+            onCaptureNeedsLocation = viewModel::queueCapturedPhotoNeedingLocation
         )
     }
 

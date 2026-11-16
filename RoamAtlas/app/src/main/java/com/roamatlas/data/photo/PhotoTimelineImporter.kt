@@ -175,22 +175,21 @@ class PhotoTimelineImporter @Inject constructor(
             persistReadPermission(uri)
 
             val nearby = findNearbyPoint(latitude, longitude, timestampMillis)
-            if (nearby != null) {
-                if (nearby.photoUri.isNullOrBlank()) {
-                    locationDao.update(
-                        nearby.copy(
-                            photoUri = thumbnailUri,
-                            originalPhotoUri = nearby.originalPhotoUri ?: originalUri,
-                            notes = mergeNotes(
-                                nearby.notes,
-                                "Photo thumbnail attached (${resolved.source})"
-                            ),
-                            updatedAtMillis = System.currentTimeMillis()
-                        )
+            // Only attach onto a nearby point that has no photo yet. If it already has one,
+            // create a new timeline/Photos entry so newly taken pictures are never dropped.
+            if (nearby != null && nearby.photoUri.isNullOrBlank()) {
+                locationDao.update(
+                    nearby.copy(
+                        photoUri = thumbnailUri,
+                        originalPhotoUri = nearby.originalPhotoUri ?: originalUri,
+                        notes = mergeNotes(
+                            nearby.notes,
+                            "Photo thumbnail attached (${resolved.source})"
+                        ),
+                        updatedAtMillis = System.currentTimeMillis()
                     )
-                    return ImportOutcome.ATTACHED
-                }
-                return ImportOutcome.DUPLICATE
+                )
+                return ImportOutcome.ATTACHED
             }
 
             val place = geoResolver.resolve(latitude, longitude)

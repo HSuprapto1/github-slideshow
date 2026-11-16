@@ -14,7 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -41,29 +41,31 @@ class PhotosViewModel @Inject constructor(
     val uiState: StateFlow<PhotosUiState> = _uiState.asStateFlow()
 
     init {
-        refresh()
+        viewModelScope.launch {
+            locationRepository.getLocationsWithPhotos(limit = 1_000)
+                .catch { error ->
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "Could not load photos."
+                    )
+                }
+                .collect { photos ->
+                    val sorted = photos.sortedByDescending { it.timestamp }
+                    _uiState.value = _uiState.value.copy(
+                        photos = sorted,
+                        isLoading = false,
+                        errorMessage = null,
+                        selected = _uiState.value.selected?.let { selected ->
+                            sorted.firstOrNull { it.id == selected.id }
+                        }
+                    )
+                }
+        }
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            runCatching {
-                locationRepository.getLocationsWithPhotos(limit = 1_000).first()
-            }.onSuccess { photos ->
-                _uiState.value = _uiState.value.copy(
-                    photos = photos.sortedByDescending { it.timestamp },
-                    isLoading = false,
-                    selected = _uiState.value.selected?.let { selected ->
-                        photos.firstOrNull { it.id == selected.id }
-                    }
-                )
-            }.onFailure {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = it.message ?: "Could not load photos."
-                )
-            }
-        }
+        // Flow collection stays live; keep for explicit pull-to-refresh callers.
+        _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
     }
 
     fun select(photo: LocationRecord?) {
@@ -98,7 +100,6 @@ class PhotosViewModel @Inject constructor(
                 alsoDeleteFromGallery = alsoDeleteFromGallery
             )
             _uiState.value = _uiState.value.copy(selected = null, message = message)
-            refresh()
         }
     }
 
@@ -127,22 +128,22 @@ class PhotosViewModel @Inject constructor(
             }
             "content" -> photoUri
             else -> {
-                val cacheDir = File(context.cacheDir, "shared_photos").apply { mkdirs() }
-                val out = File(cacheDir, "share_${photoId}.jpg")
+                val cache = File(context.cacheDir, "share_$photoId.jpg")
                 context.contentResolver.openInputStream(photoUri)?.use { input ->
-                    out.outputStream().use { output -> input.copyTo(output) }
+                    cache.outputStream().use { output -> input.copyTo(output) }
                 } ?: return null
                 FileProvider.getUriForFile(
                     context,
                     "${context.packageName}.fileprovider",
-                    out
+                    cache
                 )
             }
         }
     }
 
-    private fun formatInstant(instant: Instant): String =
-        DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+    private fun formatInstant(instant: Instant): String {
+        return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
             .withZone(ZoneId.systemDefault())
             .format(instant)
+    }
 }

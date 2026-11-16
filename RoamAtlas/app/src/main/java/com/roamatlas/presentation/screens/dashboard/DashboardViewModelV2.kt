@@ -322,14 +322,36 @@ class DashboardViewModelV2 @Inject constructor(
                 return@launch
             }
             refreshTodaySummary()
+            val message = buildString {
+                append(result.summaryMessage())
+                if (result.added > 0 || result.attachedToExisting > 0) {
+                    append(" Saved to Gallery and Photos.")
+                }
+            }
             _uiState.value = _uiState.value.copy(
                 photoImporting = false,
-                photoImportMessage = result.summaryMessage(),
+                photoImportMessage = message,
                 pendingNoGpsUris = result.pendingNoGpsUris,
                 showNoGpsResolver = result.pendingNoGpsUris.isNotEmpty(),
                 resolvingNoGpsUri = result.pendingNoGpsUris.firstOrNull()
             )
         }
+    }
+
+    /**
+     * Camera shot is already in Gallery, but GPS was unavailable — ask the user to place it
+     * so it still appears in the Photos tab / timeline.
+     */
+    fun queueCapturedPhotoNeedingLocation(uri: Uri) {
+        val pending = (_uiState.value.pendingNoGpsUris + uri).distinct()
+        _uiState.value = _uiState.value.copy(
+            photoImporting = false,
+            photoImportMessage = "Photo saved to Gallery. Choose a location to add it to Photos.",
+            pendingNoGpsUris = pending,
+            showNoGpsResolver = true,
+            resolvingNoGpsUri = pending.firstOrNull(),
+            showAddPhotoDialog = false
+        )
     }
 
     fun resolvePendingWithCurrentLocation(location: CapturedPhotoLocation) {
