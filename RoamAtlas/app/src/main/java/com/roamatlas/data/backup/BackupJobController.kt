@@ -18,6 +18,7 @@ data class BackupJobUi(
     val kind: BackupJobKind = BackupJobKind.IDLE,
     val isWorking: Boolean = false,
     val progressMessage: String? = null,
+    val progressPercent: Int? = null,
     val message: String? = null,
     val isError: Boolean = false,
     val showResultDialog: Boolean = false
@@ -39,25 +40,27 @@ class BackupJobController @Inject constructor() {
     fun isWorking(): Boolean = _ui.value.isWorking
 
     fun prepareRestore(file: File, password: CharArray) {
-        clearSecrets()
+        clearSecrets(deletePendingFile = true)
         pendingFile.set(file)
         pendingPassword.set(password.copyOf())
         _ui.value = BackupJobUi(
             kind = BackupJobKind.RESTORE,
             isWorking = true,
             progressMessage = "Starting restore in background…",
+            progressPercent = 0,
             showResultDialog = false
         )
     }
 
     fun prepareExport(uriString: String, password: CharArray) {
-        clearSecrets()
+        clearSecrets(deletePendingFile = true)
         pendingExportUri.set(uriString)
         pendingPassword.set(password.copyOf())
         _ui.value = BackupJobUi(
             kind = BackupJobKind.EXPORT,
             isWorking = true,
             progressMessage = "Starting backup in background…",
+            progressPercent = 0,
             showResultDialog = false
         )
     }
@@ -68,20 +71,26 @@ class BackupJobController @Inject constructor() {
 
     fun takeExportUri(): String? = pendingExportUri.getAndSet(null)
 
-    fun updateProgress(message: String) {
+    fun updateProgress(progress: BackupProgress) {
         _ui.value = _ui.value.copy(
             isWorking = true,
-            progressMessage = message,
+            progressMessage = progress.message,
+            progressPercent = progress.percent,
             showResultDialog = false
         )
     }
 
+    fun updateProgress(message: String, percent: Int? = null) {
+        updateProgress(BackupProgress(message, percent))
+    }
+
     fun complete(message: String, isError: Boolean) {
-        clearSecrets()
+        clearSecrets(deletePendingFile = true)
         _ui.value = BackupJobUi(
             kind = BackupJobKind.IDLE,
             isWorking = false,
             progressMessage = null,
+            progressPercent = if (isError) null else 100,
             message = message,
             isError = isError,
             showResultDialog = true
@@ -92,9 +101,10 @@ class BackupJobController @Inject constructor() {
         _ui.value = _ui.value.copy(showResultDialog = false)
     }
 
-    fun clearSecrets() {
+    fun clearSecrets(deletePendingFile: Boolean = true) {
         pendingPassword.getAndSet(null)?.fill('\u0000')
-        pendingFile.getAndSet(null)?.delete()
+        val file = pendingFile.getAndSet(null)
+        if (deletePendingFile) file?.delete()
         pendingExportUri.set(null)
     }
 }

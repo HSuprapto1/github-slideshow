@@ -10,17 +10,19 @@ import com.roamatlas.data.local.RoamAtlasDatabase
 import com.roamatlas.data.local.entity.DayTrackerEntity
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.LocationEntity
+import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TripEntity
 import com.roamatlas.data.local.entity.UserSettingsEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
-import java.io.File
-import java.io.FileInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.security.SecureRandom
@@ -33,6 +35,7 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.min
 
 data class BackupResult(
     val locations: Int,
@@ -45,6 +48,12 @@ data class BackupResult(
         get() = "$locations locations, $flights flights, $trackers trackers and $trips trips"
 }
 
+data class BackupProgress(
+    val message: String,
+    /** 0–100 when known; null means indeterminate. */
+    val percent: Int? = null
+)
+
 @Singleton
 class EncryptedBackupManager @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -55,12 +64,12 @@ class EncryptedBackupManager @Inject constructor(
     suspend fun export(
         uri: Uri,
         password: CharArray,
-        onProgress: (String) -> Unit = {}
+        onProgress: (BackupProgress) -> Unit = {}
     ): BackupResult = withContext(Dispatchers.IO) {
         require(password.size >= MIN_PASSWORD_LENGTH) {
             "Use at least $MIN_PASSWORD_LENGTH characters"
         }
-        onProgress("Encrypting backup…")
+        onProgress(BackupProgress("Encrypting backup…", 2))
         val salt = ByteArray(SALT_BYTES).also { SecureRandom().nextBytes(it) }
         val iv = ByteArray(IV_BYTES).also { SecureRandom().nextBytes(it) }
         val key = deriveKey(password, salt)
@@ -85,10 +94,10 @@ class EncryptedBackupManager @Inject constructor(
     suspend fun restore(
         uri: Uri,
         password: CharArray,
-        onProgress: (String) -> Unit = {}
+        onProgress: (BackupProgress) -> Unit = {}
     ): BackupResult = withContext(Dispatchers.IO) {
         require(password.isNotEmpty()) { "Enter the backup password" }
-        onProgress("Opening backup…")
+        onProgress(BackupProgress("Opening backup…", 1))
         val input = context.contentResolver.openInputStream(uri)
             ?: error("Could not open backup file")
         restoreFromStream(input, password, onProgress)
@@ -97,21 +106,21 @@ class EncryptedBackupManager @Inject constructor(
     suspend fun restore(
         file: File,
         password: CharArray,
-        onProgress: (String) -> Unit = {}
+        onProgress: (BackupProgress) -> Unit = {}
     ): BackupResult = withContext(Dispatchers.IO) {
         require(password.isNotEmpty()) { "Enter the backup password" }
-        onProgress("Opening backup…")
+        onProgress(BackupProgress("Opening backup…", 1))
         FileInputStream(file).use { input ->
-            restoreFromStream(input, password, onProgress)
+            restoreFromStream(input, password, onProgress, encryptedSizeHint = file.length())
         }
     }
 
     private suspend fun restoreFromStream(
         input: java.io.InputStream,
         password: CharArray,
-        onProgress: (String) -> Unit
+        onProgress: (BackupProgress) -> Unit,
+        encryptedSizeHint: Long = -1L
     ): BackupResult {
-        // Decrypt fully first so a wrong password fails before any data is wiped.
         val decryptedTemp = File(context.cacheDir, "backup-plain-${System.currentTimeMillis()}.json")
         try {
             DataInputStream(BufferedInputStream(input)).use { raw ->
@@ -120,13 +129,39 @@ class EncryptedBackupManager @Inject constructor(
                 require(magic.contentEquals(MAGIC)) { "This is not a RoamAtlas encrypted backup" }
                 val salt = ByteArray(SALT_BYTES).also { raw.readFully(it) }
                 val iv = ByteArray(IV_BYTES).also { raw.readFully(it) }
-                onProgress("Checking password…")
+                onProgress(BackupProgress("Checking password…", 3))
                 val key = deriveKey(password, salt)
                 val cipher = Cipher.getInstance(CIPHER)
                 cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
                 try {
                     CipherInputStream(raw, cipher).use { decrypted ->
-                        decryptedTemp.outputStream().use { out -> decrypted.copyTo(out) }
+                        decryptedTemp.outputStream().use { out ->
+                            val buffer = ByteArray(64 * 1024)
+                            var copied = 0L
+                            val total = encryptedSizeHint.takeIf { it > 0 }?.coerceAtLeast(1L)
+                            while (true) {
+                                val read = decrypted.read(buffer)
+                                if (read < 0) break
+                                out.write(buffer, 0, read)
+                                copied += read
+                                if (total != null) {
+                                    val pct = (5 + (copied * 15L / total)).toInt().coerceIn(5, 20)
+                                    onProgress(
+                                        BackupProgress(
+                                            "Decrypting backup… ${formatCount(copied)} bytes",
+                                            pct
+                                        )
+                                    )
+                                } else if (copied % (512 * 1024) < buffer.size) {
+                                    onProgress(
+                                        BackupProgress(
+                                            "Decrypting backup… ${formatCount(copied)} bytes",
+                                            null
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     throw IllegalArgumentException(
@@ -135,7 +170,7 @@ class EncryptedBackupManager @Inject constructor(
                     )
                 }
             }
-            onProgress("Password OK. Importing…")
+            onProgress(BackupProgress("Password OK. Importing…", 22))
             FileInputStream(decryptedTemp).use { plain ->
                 JsonReader(InputStreamReader(BufferedInputStream(plain), Charsets.UTF_8)).use { reader ->
                     return readBackup(reader, onProgress)
@@ -148,15 +183,26 @@ class EncryptedBackupManager @Inject constructor(
 
     private suspend fun writeBackup(
         writer: JsonWriter,
-        onProgress: (String) -> Unit = {}
+        onProgress: (BackupProgress) -> Unit = {}
     ): BackupResult {
         var locations = 0
         var flights = 0
+        val expectedLocations = runCatching {
+            database.locationDao().getLocationCount().first()
+        }.getOrDefault(0)
+        val expectedFlights = runCatching {
+            database.flightDao().getFlightCount().first()
+        }.getOrDefault(0)
+
         writer.beginObject()
         writer.name("formatVersion").value(FORMAT_VERSION)
         writer.name("createdAtMillis").value(System.currentTimeMillis())
+        writer.name("counts").beginObject()
+        writer.name("locations").value(expectedLocations)
+        writer.name("flights").value(expectedFlights)
+        writer.endObject()
 
-        onProgress("Exporting locations…")
+        onProgress(BackupProgress("Exporting locations… 0 / $expectedLocations", 5))
         writer.name("locations").beginArray()
         var lastLocationId = 0L
         while (true) {
@@ -165,10 +211,21 @@ class EncryptedBackupManager @Inject constructor(
             page.forEach { gson.toJson(it, LocationEntity::class.java, writer) }
             locations += page.size
             lastLocationId = page.last().id
+            val pct = if (expectedLocations > 0) {
+                5 + (locations * 70 / expectedLocations).coerceAtMost(70)
+            } else {
+                40
+            }
+            onProgress(
+                BackupProgress(
+                    "Exporting locations… ${formatCount(locations)} / ${formatCount(expectedLocations)}",
+                    pct
+                )
+            )
         }
         writer.endArray()
 
-        onProgress("Exporting flights…")
+        onProgress(BackupProgress("Exporting flights…", 78))
         writer.name("flights").beginArray()
         var lastFlightId = 0L
         while (true) {
@@ -177,10 +234,21 @@ class EncryptedBackupManager @Inject constructor(
             page.forEach { gson.toJson(it, FlightEntity::class.java, writer) }
             flights += page.size
             lastFlightId = page.last().id
+            val pct = if (expectedFlights > 0) {
+                78 + (flights * 12 / expectedFlights).coerceAtMost(12)
+            } else {
+                85
+            }
+            onProgress(
+                BackupProgress(
+                    "Exporting flights… ${formatCount(flights)} / ${formatCount(expectedFlights)}",
+                    pct
+                )
+            )
         }
         writer.endArray()
 
-        onProgress("Exporting trackers, trips and settings…")
+        onProgress(BackupProgress("Exporting trackers, trips and settings…", 92))
         val trackers = database.dayTrackerDao().getAllSnapshot()
         writer.name("trackers")
         gson.toJson(trackers, List::class.java, writer)
@@ -191,12 +259,13 @@ class EncryptedBackupManager @Inject constructor(
         writer.name("settings")
         gson.toJson(settings, List::class.java, writer)
         writer.endObject()
+        onProgress(BackupProgress("Backup file ready", 100))
         return BackupResult(locations, flights, trackers.size, trips.size, settings.size)
     }
 
     private suspend fun readBackup(
         reader: JsonReader,
-        onProgress: (String) -> Unit = {}
+        onProgress: (BackupProgress) -> Unit = {}
     ): BackupResult {
         var formatVersion = 0
         var locations = 0
@@ -204,8 +273,10 @@ class EncryptedBackupManager @Inject constructor(
         var trackers = 0
         var trips = 0
         var settings = 0
+        var expectedLocations = 0
+        var expectedFlights = 0
         database.withTransaction {
-            onProgress("Clearing current data…")
+            onProgress(BackupProgress("Clearing current data…", 24))
             database.locationDao().deleteAll()
             database.flightDao().deleteAll()
             database.dayTrackerDao().deleteAll()
@@ -217,62 +288,81 @@ class EncryptedBackupManager @Inject constructor(
                 when (reader.nextName()) {
                     "formatVersion" -> formatVersion = reader.nextInt()
                     "createdAtMillis" -> reader.nextLong()
+                    "counts" -> {
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            when (reader.nextName()) {
+                                "locations" -> expectedLocations = reader.nextInt()
+                                "flights" -> expectedFlights = reader.nextInt()
+                                else -> reader.skipValue()
+                            }
+                        }
+                        reader.endObject()
+                    }
                     "locations" -> {
-                        onProgress("Restoring locations…")
+                        onProgress(BackupProgress("Restoring locations…", 25))
                         reader.beginArray()
                         val batch = ArrayList<LocationEntity>(PAGE_SIZE)
                         while (reader.hasNext()) {
-                            batch.add(gson.fromJson(reader, LocationEntity::class.java))
+                            batch.add(sanitizeLocation(gson.fromJson(reader, LocationEntity::class.java)))
                             if (batch.size >= PAGE_SIZE) {
                                 locations += database.locationDao().insertAll(batch).count { it != -1L }
                                 batch.clear()
-                                onProgress("Restoring locations… $locations")
+                                onProgress(locationProgress(locations, expectedLocations))
                             }
                         }
                         if (batch.isNotEmpty()) {
                             locations += database.locationDao().insertAll(batch).count { it != -1L }
+                            onProgress(locationProgress(locations, expectedLocations))
                         }
                         reader.endArray()
                     }
                     "flights" -> {
-                        onProgress("Restoring flights and journeys…")
+                        onProgress(BackupProgress("Restoring flights and journeys…", 88))
                         reader.beginArray()
                         val batch = ArrayList<FlightEntity>(PAGE_SIZE)
                         while (reader.hasNext()) {
-                            batch.add(gson.fromJson(reader, FlightEntity::class.java))
+                            batch.add(sanitizeFlight(gson.fromJson(reader, FlightEntity::class.java)))
                             if (batch.size >= PAGE_SIZE) {
                                 flights += database.flightDao().insertAll(batch).size
                                 batch.clear()
+                                onProgress(flightProgress(flights, expectedFlights))
                             }
                         }
                         if (batch.isNotEmpty()) {
                             flights += database.flightDao().insertAll(batch).size
+                            onProgress(flightProgress(flights, expectedFlights))
                         }
                         reader.endArray()
                     }
                     "trackers" -> {
+                        onProgress(BackupProgress("Restoring day trackers…", 95))
                         reader.beginArray()
                         val values = mutableListOf<DayTrackerEntity>()
                         while (reader.hasNext()) {
-                            values.add(gson.fromJson(reader, DayTrackerEntity::class.java))
+                            values.add(sanitizeTracker(gson.fromJson(reader, DayTrackerEntity::class.java)))
                         }
                         reader.endArray()
                         database.dayTrackerDao().insertAll(values)
                         trackers = values.size
                     }
                     "trips" -> {
+                        onProgress(BackupProgress("Restoring journeys…", 97))
                         reader.beginArray()
                         val values = mutableListOf<TripEntity>()
-                        while (reader.hasNext()) values.add(gson.fromJson(reader, TripEntity::class.java))
+                        while (reader.hasNext()) {
+                            values.add(sanitizeTrip(gson.fromJson(reader, TripEntity::class.java)))
+                        }
                         reader.endArray()
                         database.tripDao().insertAll(values)
                         trips = values.size
                     }
                     "settings" -> {
+                        onProgress(BackupProgress("Restoring settings…", 99))
                         reader.beginArray()
                         val values = mutableListOf<UserSettingsEntity>()
                         while (reader.hasNext()) {
-                            values.add(gson.fromJson(reader, UserSettingsEntity::class.java))
+                            values.add(sanitizeSetting(gson.fromJson(reader, UserSettingsEntity::class.java)))
                         }
                         reader.endArray()
                         database.userSettingsDao().setSettings(values)
@@ -286,8 +376,69 @@ class EncryptedBackupManager @Inject constructor(
                 "Unsupported RoamAtlas backup version $formatVersion"
             }
         }
+        onProgress(BackupProgress("Restore finished", 100))
         return BackupResult(locations, flights, trackers, trips, settings)
     }
+
+    private fun locationProgress(done: Int, expected: Int): BackupProgress {
+        val pct = if (expected > 0) {
+            25 + (done * 60 / expected).coerceAtMost(60)
+        } else {
+            // Soft climb when older backups have no counts.
+            25 + min(60, (kotlin.math.ln((done + 1).toDouble()) * 8).toInt())
+        }
+        val totalLabel = if (expected > 0) formatCount(expected) else "?"
+        return BackupProgress(
+            "Restoring locations… ${formatCount(done)} / $totalLabel",
+            pct
+        )
+    }
+
+    private fun flightProgress(done: Int, expected: Int): BackupProgress {
+        val pct = if (expected > 0) {
+            88 + (done * 6 / expected).coerceAtMost(6)
+        } else {
+            90
+        }
+        val totalLabel = if (expected > 0) formatCount(expected) else "?"
+        return BackupProgress(
+            "Restoring flights… ${formatCount(done)} / $totalLabel",
+            pct
+        )
+    }
+
+    /** Gson can leave Kotlin non-null fields as null — sanitize before Room insert. */
+    private fun sanitizeLocation(entity: LocationEntity): LocationEntity = entity.copy(
+        source = nonNullString(entity.source, "BACKUP"),
+        confidence = nonNullString(entity.confidence, "UNKNOWN")
+    )
+
+    private fun sanitizeFlight(entity: FlightEntity): FlightEntity = entity.copy(
+        departureAirportCode = nonNullString(entity.departureAirportCode, "UNK"),
+        arrivalAirportCode = nonNullString(entity.arrivalAirportCode, "UNK"),
+        source = nonNullString(entity.source, "BACKUP"),
+        transportMode = nonNullString(entity.transportMode, TransportMode.FLIGHT)
+    )
+
+    private fun sanitizeTracker(entity: DayTrackerEntity): DayTrackerEntity = entity.copy(
+        name = nonNullString(entity.name, "Tracker"),
+        countryCode = nonNullString(entity.countryCode, "XX"),
+        countryName = nonNullString(entity.countryName, "Unknown"),
+        countingMode = nonNullString(entity.countingMode, "CALENDAR"),
+        countingRule = nonNullString(entity.countingRule, "ANY_POINT")
+    )
+
+    private fun sanitizeTrip(entity: TripEntity): TripEntity = entity.copy(
+        name = nonNullString(entity.name, "Journey")
+    )
+
+    private fun sanitizeSetting(entity: UserSettingsEntity): UserSettingsEntity = entity.copy(
+        key = nonNullString(entity.key, "unknown"),
+        value = nonNullString(entity.value, "")
+    )
+
+    private fun nonNullString(value: String?, fallback: String): String =
+        (value as String?)?.takeIf { it.isNotBlank() } ?: fallback
 
     private fun deriveKey(password: CharArray, salt: ByteArray): SecretKeySpec {
         val spec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, KEY_BITS)
@@ -300,9 +451,14 @@ class EncryptedBackupManager @Inject constructor(
         }
     }
 
+    private fun formatCount(value: Long): String =
+        "%,d".format(value)
+
+    private fun formatCount(value: Int): String = formatCount(value.toLong())
+
     companion object {
         private val MAGIC = byteArrayOf(0x52, 0x41, 0x42, 0x31) // RAB1
-        private const val FORMAT_VERSION = 1
+        private const val FORMAT_VERSION = 2
         private const val CIPHER = "AES/GCM/NoPadding"
         private const val SALT_BYTES = 16
         private const val IV_BYTES = 12

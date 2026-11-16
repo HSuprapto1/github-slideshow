@@ -59,21 +59,29 @@ class BackupForegroundService : Service() {
             return
         }
         running = true
-        startAsForeground("Restoring backup", "Keep RoamAtlas installed — restore continues in background.")
+        startAsForeground(
+            title = "Restoring backup",
+            text = "0% · Preparing…",
+            percent = 0
+        )
         scope.launch {
             try {
-                val result = manager.restore(file, password) { stage ->
-                    jobController.updateProgress(stage)
-                    updateNotification("Restoring backup", stage)
+                val result = manager.restore(file, password) { progress ->
+                    jobController.updateProgress(progress)
+                    updateNotification(
+                        title = "Restoring backup",
+                        text = progressLabel(progress),
+                        percent = progress.percent
+                    )
                 }
                 jobController.complete(
                     message = "Restore successful.\n\n${result.summary}.\n\nOpen Dashboard to see your data.",
                     isError = false
                 )
-                updateNotification("Restore complete", result.summary)
+                updateNotification("Restore complete", result.summary, 100)
             } catch (e: Exception) {
                 jobController.complete(message = friendlyError(e), isError = true)
-                updateNotification("Restore failed", friendlyError(e).lines().first())
+                updateNotification("Restore failed", friendlyError(e).lines().first(), null)
             } finally {
                 password.fill('\u0000')
                 file.delete()
@@ -93,21 +101,29 @@ class BackupForegroundService : Service() {
             return
         }
         running = true
-        startAsForeground("Creating backup", "Export continues in the background.")
+        startAsForeground(
+            title = "Creating backup",
+            text = "0% · Preparing…",
+            percent = 0
+        )
         scope.launch {
             try {
-                val result = manager.export(Uri.parse(uriString), password) { stage ->
-                    jobController.updateProgress(stage)
-                    updateNotification("Creating backup", stage)
+                val result = manager.export(Uri.parse(uriString), password) { progress ->
+                    jobController.updateProgress(progress)
+                    updateNotification(
+                        title = "Creating backup",
+                        text = progressLabel(progress),
+                        percent = progress.percent
+                    )
                 }
                 jobController.complete(
                     message = "Backup saved successfully.\n\n${result.summary}.",
                     isError = false
                 )
-                updateNotification("Backup complete", result.summary)
+                updateNotification("Backup complete", result.summary, 100)
             } catch (e: Exception) {
                 jobController.complete(message = friendlyError(e), isError = true)
-                updateNotification("Backup failed", friendlyError(e).lines().first())
+                updateNotification("Backup failed", friendlyError(e).lines().first(), null)
             } finally {
                 password.fill('\u0000')
                 running = false
@@ -117,33 +133,42 @@ class BackupForegroundService : Service() {
         }
     }
 
-    private fun startAsForeground(title: String, text: String) {
-        val notification = buildNotification(title, text)
-        if (Build.VERSION.SDK_INT >= 29) {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
+    private fun progressLabel(progress: BackupProgress): String {
+        val pct = progress.percent
+        return if (pct != null) "$pct% · ${progress.message}" else progress.message
+    }
+
+    private fun startAsForeground(title: String, text: String, percent: Int?) {
+        val notification = buildNotification(title, text, percent)
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (_: Exception) {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
 
-    private fun updateNotification(title: String, text: String) {
+    private fun updateNotification(title: String, text: String, percent: Int?) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(title, text))
+        manager.notify(NOTIFICATION_ID, buildNotification(title, text, percent))
     }
 
-    private fun buildNotification(title: String, text: String): Notification {
+    private fun buildNotification(title: String, text: String, percent: Int?): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -151,20 +176,31 @@ class BackupForegroundService : Service() {
             .setContentIntent(openApp)
             .setOngoing(jobController.isWorking())
             .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+        if (percent != null) {
+            builder.setProgress(100, percent.coerceIn(0, 100), false)
+        } else {
+            builder.setProgress(100, 0, true)
+        }
+        return builder.build()
     }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java)
+        // Recreate with DEFAULT importance so it appears in the shade on Samsung.
+        manager.deleteNotificationChannel(CHANNEL_ID)
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Backup & restore",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Shows progress while RoamAtlas restores or creates an encrypted backup"
+            description = "Shows percent progress while RoamAtlas restores or creates a backup"
+            setShowBadge(false)
         }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        manager.createNotificationChannel(channel)
     }
 
     private fun friendlyError(error: Throwable): String {
@@ -173,6 +209,9 @@ class BackupForegroundService : Service() {
             text.contains("unlock", ignoreCase = true) ||
                 text.contains("password", ignoreCase = true) ->
                 "Wrong password or damaged backup file. Check the password and try again."
+            text.contains("bindString", ignoreCase = true) ||
+                text.contains("non-null is null", ignoreCase = true) ->
+                "Backup data had missing fields and could not be imported. Update RoamAtlas and try restore again."
             text.contains("not a RoamAtlas", ignoreCase = true) ->
                 "That file is not a RoamAtlas encrypted backup (.rabackup)."
             text.isNotBlank() -> text
@@ -186,7 +225,7 @@ class BackupForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "roamatlas_backup"
+        private const val CHANNEL_ID = "roamatlas_backup_v2"
         private const val NOTIFICATION_ID = 44021
         const val ACTION_RESTORE = "com.roamatlas.backup.RESTORE"
         const val ACTION_EXPORT = "com.roamatlas.backup.EXPORT"

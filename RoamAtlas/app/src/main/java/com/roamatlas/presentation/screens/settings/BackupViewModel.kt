@@ -24,6 +24,7 @@ data class BackupUiState(
     val password: String = "",
     val isWorking: Boolean = false,
     val progressMessage: String? = null,
+    val progressPercent: Int? = null,
     val message: String? = null,
     val isError: Boolean = false,
     val showResultDialog: Boolean = false
@@ -47,6 +48,7 @@ class BackupViewModel @Inject constructor(
             password = pwd,
             isWorking = job.isWorking,
             progressMessage = job.progressMessage,
+            progressPercent = job.progressPercent,
             message = job.message,
             isError = job.isError,
             showResultDialog = job.showResultDialog
@@ -58,6 +60,7 @@ class BackupViewModel @Inject constructor(
             password = password.value,
             isWorking = jobController.ui.value.isWorking,
             progressMessage = jobController.ui.value.progressMessage,
+            progressPercent = jobController.ui.value.progressPercent,
             message = jobController.ui.value.message,
             isError = jobController.ui.value.isError,
             showResultDialog = jobController.ui.value.showResultDialog
@@ -86,7 +89,6 @@ class BackupViewModel @Inject constructor(
             )
             return
         }
-        // Persist read/write access for the chosen document while export runs in the service.
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
@@ -110,7 +112,7 @@ class BackupViewModel @Inject constructor(
         }
         viewModelScope.launch {
             try {
-                jobController.updateProgress("Copying backup into RoamAtlas…")
+                jobController.updateProgress("Copying backup into RoamAtlas…", 1)
                 val localCopy = withContext(Dispatchers.IO) { copyBackupToCache(uri) }
                 jobController.prepareRestore(localCopy, pwd.toCharArray())
                 BackupForegroundService.startRestore(context)

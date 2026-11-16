@@ -1,5 +1,8 @@
 package com.roamatlas.presentation.screens.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -8,7 +11,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FileDownload
@@ -18,10 +24,10 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -30,16 +36,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import java.time.LocalDate
 
@@ -50,17 +59,31 @@ fun BackupScreen(
     viewModel: BackupViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     var pendingRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var passwordVisible by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(viewModel::export) }
-    // GetContent is more reliable on Samsung when returning from Files/Drive.
     val restoreLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            pendingRestoreUri = uri
+        if (uri != null) pendingRestoreUri = uri
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* progress also shows on-screen if denied */ }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
@@ -88,8 +111,7 @@ fun BackupScreen(
             text = {
                 Text(
                     "Restore replaces locations, flights, trackers, trips and settings with this backup. " +
-                        "It runs as a background job with a notification, so switching apps will not cancel it. " +
-                        "Large location history can take several minutes — that does not mean the file is corrupt."
+                        "Progress appears on this screen and in a notification. Switching apps is OK."
                 )
             },
             confirmButton = {
@@ -124,27 +146,14 @@ fun BackupScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .imePadding()
+                .verticalScroll(scrollState)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "Backups use AES-256 encryption and include locations, flights, trackers, trips and settings.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        "1. Type your backup password\n" +
-                            "2. Tap Restore and pick the .rabackup file\n" +
-                            "3. A notification shows progress — you can switch apps; restore keeps running\n" +
-                            "4. Wait for the success/failure dialog (large GPS history can take several minutes)",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
             OutlinedTextField(
                 value = state.password,
                 onValueChange = viewModel::setPassword,
@@ -204,16 +213,60 @@ fun BackupScreen(
                 Icon(Icons.Default.FileDownload, contentDescription = null)
                 Text(" Restore encrypted backup")
             }
+
             if (state.isWorking) {
-                CircularProgressIndicator()
-                Text(
-                    "Working in the background… Check the notification. Switching apps is OK.",
-                    fontWeight = FontWeight.SemiBold
-                )
-                state.progressMessage?.let {
-                    Text(it, color = MaterialTheme.colorScheme.primary)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            if (state.progressPercent != null) {
+                                "Progress ${state.progressPercent}%"
+                            } else {
+                                "Working…"
+                            },
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (state.progressPercent != null) {
+                            LinearProgressIndicator(
+                                progress = { state.progressPercent!! / 100f },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                        Text(
+                            state.progressMessage ?: "Preparing…",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "You can switch apps. Watch this bar or the RoamAtlas notification.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Backups use AES-256 encryption and include locations, flights, trackers, trips and settings.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "1. Type your backup password (use the eye icon to show it)\n" +
+                            "2. Tap Restore and pick the .rabackup file\n" +
+                            "3. Allow notifications when asked, so progress shows in the shade\n" +
+                            "4. Wait for the percent bar / success dialog — large GPS history can take several minutes",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
             if (!state.showResultDialog) {
                 state.message?.let {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -224,6 +277,7 @@ fun BackupScreen(
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(48.dp))
         }
     }
 }
