@@ -23,9 +23,13 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.security.SecureRandom
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
@@ -42,10 +46,14 @@ data class BackupResult(
     val flights: Int,
     val trackers: Int,
     val trips: Int,
-    val settings: Int
+    val settings: Int,
+    val mediaFiles: Int = 0
 ) {
     val summary: String
-        get() = "$locations locations, $flights flights, $trackers trackers and $trips trips"
+        get() = buildString {
+            append("$locations locations, $flights flights, $trackers trackers and $trips trips")
+            if (mediaFiles > 0) append(", $mediaFiles photo/ticket files")
+        }
 }
 
 data class BackupProgress(
@@ -76,19 +84,35 @@ class EncryptedBackupManager @Inject constructor(
         val cipher = Cipher.getInstance(CIPHER)
         cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
 
-        val output = context.contentResolver.openOutputStream(uri, "wt")
-            ?: error("Could not create backup file")
-        DataOutputStream(BufferedOutputStream(output)).use { raw ->
-            raw.write(MAGIC)
-            raw.write(salt)
-            raw.write(iv)
-            raw.flush()
-            CipherOutputStream(raw, cipher).use { encrypted ->
-                JsonWriter(OutputStreamWriter(encrypted, Charsets.UTF_8)).use { writer ->
+        val jsonTemp = File(context.cacheDir, "backup-export-${System.currentTimeMillis()}.json")
+        try {
+            val result = FileOutputStream(jsonTemp).use { out ->
+                JsonWriter(OutputStreamWriter(BufferedOutputStream(out), Charsets.UTF_8)).use { writer ->
                     writeBackup(writer, onProgress)
                 }
             }
+            val output = context.contentResolver.openOutputStream(uri, "wt")
+                ?: error("Could not create backup file")
+            DataOutputStream(BufferedOutputStream(output)).use { raw ->
+                raw.write(MAGIC)
+                raw.write(salt)
+                raw.write(iv)
+                raw.flush()
+                CipherOutputStream(raw, cipher).use { encrypted ->
+                    ZipOutputStream(BufferedOutputStream(encrypted)).use { zip ->
+                        zip.putNextEntry(ZipEntry(ENTRY_BACKUP_JSON))
+                        FileInputStream(jsonTemp).use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                        val mediaCount = packMediaFiles(zip, onProgress)
+                        zip.finish()
+                        return@withContext result.copy(mediaFiles = mediaCount)
+                    }
+                }
+            }
+        } finally {
+            jsonTemp.delete()
         }
+        error("Backup export failed")
     }
 
     suspend fun restore(
@@ -121,7 +145,7 @@ class EncryptedBackupManager @Inject constructor(
         onProgress: (BackupProgress) -> Unit,
         encryptedSizeHint: Long = -1L
     ): BackupResult {
-        val decryptedTemp = File(context.cacheDir, "backup-plain-${System.currentTimeMillis()}.json")
+        val decryptedTemp = File(context.cacheDir, "backup-plain-${System.currentTimeMillis()}.bin")
         try {
             DataInputStream(BufferedInputStream(input)).use { raw ->
                 val magic = ByteArray(MAGIC.size)
@@ -129,7 +153,12 @@ class EncryptedBackupManager @Inject constructor(
                 require(magic.contentEquals(MAGIC)) { "This is not a RoamAtlas encrypted backup" }
                 val salt = ByteArray(SALT_BYTES).also { raw.readFully(it) }
                 val iv = ByteArray(IV_BYTES).also { raw.readFully(it) }
-                onProgress(BackupProgress("Checking password…", 3))
+                onProgress(
+                    BackupProgress(
+                        "Checking password (can take ~10–30s on phone — not stuck)…",
+                        3
+                    )
+                )
                 val key = deriveKey(password, salt)
                 val cipher = Cipher.getInstance(CIPHER)
                 cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
@@ -152,13 +181,6 @@ class EncryptedBackupManager @Inject constructor(
                                             pct
                                         )
                                     )
-                                } else if (copied % (512 * 1024) < buffer.size) {
-                                    onProgress(
-                                        BackupProgress(
-                                            "Decrypting backup… ${formatCount(copied)} bytes",
-                                            null
-                                        )
-                                    )
                                 }
                             }
                         }
@@ -171,13 +193,129 @@ class EncryptedBackupManager @Inject constructor(
                 }
             }
             onProgress(BackupProgress("Password OK. Importing…", 22))
-            FileInputStream(decryptedTemp).use { plain ->
-                JsonReader(InputStreamReader(BufferedInputStream(plain), Charsets.UTF_8)).use { reader ->
-                    return readBackup(reader, onProgress)
+            return if (isZipFile(decryptedTemp)) {
+                restoreFromZip(decryptedTemp, onProgress)
+            } else {
+                // Legacy JSON-only backups (no photo files).
+                FileInputStream(decryptedTemp).use { plain ->
+                    JsonReader(InputStreamReader(BufferedInputStream(plain), Charsets.UTF_8)).use { reader ->
+                        readBackup(reader, onProgress)
+                    }
                 }
             }
         } finally {
             decryptedTemp.delete()
+        }
+    }
+
+    private suspend fun restoreFromZip(
+        zipFile: File,
+        onProgress: (BackupProgress) -> Unit
+    ): BackupResult {
+        var jsonTemp: File? = null
+        var mediaRestored = 0
+        try {
+            ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    when {
+                        name == ENTRY_BACKUP_JSON || name.endsWith("/$ENTRY_BACKUP_JSON") -> {
+                            jsonTemp = File(context.cacheDir, "backup-json-${System.currentTimeMillis()}.json")
+                            FileOutputStream(jsonTemp).use { out -> zip.copyTo(out) }
+                        }
+                        name.startsWith(ENTRY_MEDIA_PREFIX) && !entry.isDirectory -> {
+                            mediaRestored += if (restoreMediaEntry(name, zip)) 1 else 0
+                            onProgress(
+                                BackupProgress(
+                                    "Restoring photos… $mediaRestored files",
+                                    22
+                                )
+                            )
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+            val json = jsonTemp ?: error("Backup archive is missing database data.")
+            onProgress(BackupProgress("Importing database…", 24))
+            val result = FileInputStream(json).use { plain ->
+                JsonReader(InputStreamReader(BufferedInputStream(plain), Charsets.UTF_8)).use { reader ->
+                    readBackup(reader, onProgress)
+                }
+            }
+            return result.copy(mediaFiles = mediaRestored)
+        } finally {
+            jsonTemp?.delete()
+        }
+    }
+
+    private fun restoreMediaEntry(entryName: String, zip: ZipInputStream): Boolean {
+        val relative = entryName.removePrefix(ENTRY_MEDIA_PREFIX)
+        val target = resolveMediaTarget(relative) ?: return false
+        target.parentFile?.mkdirs()
+        FileOutputStream(target).use { out -> zip.copyTo(out) }
+        return target.exists() && target.length() > 0L
+    }
+
+    private fun resolveMediaTarget(relative: String): File? {
+        val clean = relative.trimStart('/').replace('\\', '/')
+        return when {
+            clean.startsWith("files/") -> File(context.filesDir, clean.removePrefix("files/"))
+            clean.startsWith("ext/") -> {
+                val extRoot = context.getExternalFilesDir(null) ?: return null
+                File(extRoot, clean.removePrefix("ext/"))
+            }
+            else -> null
+        }
+    }
+
+    private fun packMediaFiles(
+        zip: ZipOutputStream,
+        onProgress: (BackupProgress) -> Unit
+    ): Int {
+        val roots = listOf(
+            "files" to context.filesDir,
+            "ext" to context.getExternalFilesDir(null)
+        )
+        val files = mutableListOf<Pair<String, File>>()
+        roots.forEach { (prefix, root) ->
+            if (root == null || !root.exists()) return@forEach
+            listOf("photo_thumbs", "journey_photos", "place_photos").forEach { folder ->
+                val dir = File(root, folder)
+                if (!dir.isDirectory) return@forEach
+                dir.walkTopDown().filter { it.isFile }.forEach { file ->
+                    val rel = file.relativeTo(root).invariantSeparatorsPath
+                    files += "$prefix/$rel" to file
+                }
+            }
+        }
+        if (files.isEmpty()) {
+            onProgress(BackupProgress("No local photo files to include", 98))
+            return 0
+        }
+        files.forEachIndexed { index, (entryPath, file) ->
+            zip.putNextEntry(ZipEntry("$ENTRY_MEDIA_PREFIX$entryPath"))
+            FileInputStream(file).use { input -> input.copyTo(zip) }
+            zip.closeEntry()
+            val pct = 93 + ((index + 1) * 6 / files.size).coerceAtMost(6)
+            onProgress(
+                BackupProgress(
+                    "Packing photos… ${index + 1} / ${files.size}",
+                    pct
+                )
+            )
+        }
+        return files.size
+    }
+
+    private fun isZipFile(file: File): Boolean {
+        if (file.length() < 4) return false
+        FileInputStream(file).use { input ->
+            val header = ByteArray(4)
+            if (input.read(header) < 4) return false
+            return header[0] == 0x50.toByte() && header[1] == 0x4B.toByte()
         }
     }
 
@@ -259,7 +397,7 @@ class EncryptedBackupManager @Inject constructor(
         writer.name("settings")
         gson.toJson(settings, List::class.java, writer)
         writer.endObject()
-        onProgress(BackupProgress("Backup file ready", 100))
+        onProgress(BackupProgress("Database export ready", 92))
         return BackupResult(locations, flights, trackers.size, trips.size, settings.size)
     }
 
@@ -458,7 +596,9 @@ class EncryptedBackupManager @Inject constructor(
 
     companion object {
         private val MAGIC = byteArrayOf(0x52, 0x41, 0x42, 0x31) // RAB1
-        private const val FORMAT_VERSION = 2
+        private const val FORMAT_VERSION = 3
+        private const val ENTRY_BACKUP_JSON = "backup.json"
+        private const val ENTRY_MEDIA_PREFIX = "media/"
         private const val CIPHER = "AES/GCM/NoPadding"
         private const val SALT_BYTES = 16
         private const val IV_BYTES = 12

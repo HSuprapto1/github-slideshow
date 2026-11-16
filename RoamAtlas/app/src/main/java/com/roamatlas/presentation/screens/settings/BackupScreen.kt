@@ -254,14 +254,15 @@ fun BackupScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Backups use AES-256 encryption and include locations, flights, trackers, trips and settings.",
+                        "Backups use AES-256 encryption and include locations, flights, trackers, trips, settings, and local photo/ticket files (new backups).",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
                         "1. Type your backup password (use the eye icon to show it)\n" +
                             "2. Tap Restore and pick the .rabackup file\n" +
                             "3. Allow notifications when asked, so progress shows in the shade\n" +
-                            "4. Wait for the percent bar / success dialog — large GPS history can take several minutes",
+                            "4. Wait for the percent bar / success dialog — large GPS history can take several minutes\n" +
+                            "5. Older backups (before this update) only restored the database, not photo files",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

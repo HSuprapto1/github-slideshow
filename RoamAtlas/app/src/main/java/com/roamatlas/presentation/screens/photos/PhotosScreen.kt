@@ -159,18 +159,37 @@ fun PhotosScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(state.photos, key = { it.id }) { photo ->
-                                AsyncImage(
-                                    model = photo.photoUri?.let(Uri::parse),
-                                    contentDescription = "Photo thumbnail",
-                                    contentScale = ContentScale.Crop,
+                                var loadFailed by remember(photo.id) { mutableStateOf(false) }
+                                Box(
                                     modifier = Modifier
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        )
                                         .combinedClickable(
                                             onClick = { viewModel.select(photo) },
                                             onLongClick = { viewModel.select(photo) }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (loadFailed || photo.photoUri.isNullOrBlank()) {
+                                        Text(
+                                            "File missing\n(re-backup needed)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(8.dp)
                                         )
-                                )
+                                    } else {
+                                        AsyncImage(
+                                            model = Uri.parse(photo.photoUri),
+                                            contentDescription = "Photo thumbnail",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize(),
+                                            onError = { loadFailed = true }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
