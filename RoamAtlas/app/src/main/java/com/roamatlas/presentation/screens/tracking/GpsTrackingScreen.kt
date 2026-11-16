@@ -54,7 +54,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -62,9 +62,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.roamatlas.data.location.TrackingMode
 import com.roamatlas.presentation.theme.VerifiedLocation
 import java.time.ZoneId
@@ -77,16 +79,27 @@ fun GpsTrackingScreen(
     viewModel: GpsTrackingViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
+    ) {
         viewModel.refreshPermissions()
     }
     
     val backgroundPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
+    ) {
         viewModel.refreshPermissions()
     }
 
@@ -122,39 +135,35 @@ fun GpsTrackingScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (!uiState.hasLocationPermission ||
-                !uiState.hasBackgroundPermission ||
-                !uiState.hasNotificationPermission
-            ) {
-                item {
-                    PermissionCard(
-                        hasLocationPermission = uiState.hasLocationPermission,
-                        hasBackgroundPermission = uiState.hasBackgroundPermission,
-                        hasNotificationPermission = uiState.hasNotificationPermission,
-                        onRequestLocationPermission = {
-                            locationPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
+            item {
+                PermissionCard(
+                    hasLocationPermission = uiState.hasLocationPermission,
+                    hasBackgroundPermission = uiState.hasBackgroundPermission,
+                    hasNotificationPermission = uiState.hasNotificationPermission,
+                    allGranted = uiState.allPermissionsGranted,
+                    onRequestLocationPermission = {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
                             )
-                        },
-                        onRequestBackgroundPermission = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                backgroundPermissionLauncher.launch(
-                                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                                )
-                            }
-                        },
-                        onRequestNotificationPermission = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                notificationPermissionLauncher.launch(
-                                    Manifest.permission.POST_NOTIFICATIONS
-                                )
-                            }
+                        )
+                    },
+                    onRequestBackgroundPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            backgroundPermissionLauncher.launch(
+                                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                            )
                         }
-                    )
-                }
+                    },
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(
+                                Manifest.permission.POST_NOTIFICATIONS
+                            )
+                        }
+                    }
+                )
             }
             
             item {
@@ -168,9 +177,7 @@ fun GpsTrackingScreen(
                     onStop = { viewModel.stopTracking() },
                     onPause = { viewModel.pauseTracking() },
                     onResume = { viewModel.resumeTracking() },
-                    enabled = uiState.hasLocationPermission &&
-                        uiState.hasBackgroundPermission &&
-                        uiState.hasNotificationPermission
+                    enabled = uiState.allPermissionsGranted
                 )
             }
             
@@ -209,14 +216,21 @@ private fun PermissionCard(
     hasLocationPermission: Boolean,
     hasBackgroundPermission: Boolean,
     hasNotificationPermission: Boolean,
+    allGranted: Boolean,
     onRequestLocationPermission: () -> Unit,
     onRequestBackgroundPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit
 ) {
+    val showBackgroundRow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+    val showNotificationRow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+            containerColor = if (allGranted) {
+                VerifiedLocation.copy(alpha = 0.12f)
+            } else {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+            }
         )
     ) {
         Column(
@@ -224,45 +238,45 @@ private fun PermissionCard(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Default.Warning,
+                    imageVector = if (allGranted) Icons.Default.Check else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error
+                    tint = if (allGranted) VerifiedLocation else MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Permissions Required",
+                    text = if (allGranted) "Permissions granted" else "Permissions required",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }
             
             Spacer(modifier = Modifier.height(12.dp))
-            
-            if (!hasLocationPermission) {
-                PermissionRow(
-                    title = "Location Access",
-                    description = "Required to record your GPS position",
-                    granted = false,
-                    onRequest = onRequestLocationPermission
-                )
-            }
-            
-            if (hasLocationPermission && !hasBackgroundPermission) {
+
+            PermissionRow(
+                title = "Location Access",
+                description = "Needed to record your GPS position",
+                granted = hasLocationPermission,
+                onRequest = onRequestLocationPermission
+            )
+
+            if (showBackgroundRow) {
                 Spacer(modifier = Modifier.height(8.dp))
                 PermissionRow(
                     title = "Background Location",
-                    description = "Required to track when app is in background",
-                    granted = false,
-                    onRequest = onRequestBackgroundPermission
+                    description = "Needed to track when the app is in the background",
+                    granted = hasBackgroundPermission,
+                    // Android requires foreground location before background can be requested.
+                    onRequest = onRequestBackgroundPermission,
+                    requestEnabled = hasLocationPermission
                 )
             }
 
-            if (!hasNotificationPermission) {
+            if (showNotificationRow) {
                 Spacer(modifier = Modifier.height(8.dp))
                 PermissionRow(
                     title = "Notifications",
-                    description = "Required to show that background tracking is active",
-                    granted = false,
+                    description = "Needed to show that background tracking is active",
+                    granted = hasNotificationPermission,
                     onRequest = onRequestNotificationPermission
                 )
             }
@@ -275,7 +289,8 @@ private fun PermissionRow(
     title: String,
     description: String,
     granted: Boolean,
-    onRequest: () -> Unit
+    onRequest: () -> Unit,
+    requestEnabled: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -294,14 +309,25 @@ private fun PermissionRow(
             )
         }
         if (granted) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Granted",
-                tint = VerifiedLocation
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = VerifiedLocation,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Granted",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = VerifiedLocation
+                )
+            }
         } else {
             Button(
                 onClick = onRequest,
+                enabled = requestEnabled,
                 modifier = Modifier.height(36.dp)
             ) {
                 Text("Grant")
