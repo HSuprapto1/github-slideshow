@@ -88,7 +88,8 @@ fun BackupScreen(
             text = {
                 Text(
                     "Restore replaces locations, flights, trackers, trips and settings with this backup. " +
-                        "RoamAtlas will copy the file first, so switching apps during restore is safer."
+                        "It runs as a background job with a notification, so switching apps will not cancel it. " +
+                        "Large location history can take several minutes — that does not mean the file is corrupt."
                 )
             },
             confirmButton = {
@@ -138,7 +139,8 @@ fun BackupScreen(
                     Text(
                         "1. Type your backup password\n" +
                             "2. Tap Restore and pick the .rabackup file\n" +
-                            "3. Wait for the success dialog — keep RoamAtlas open until then",
+                            "3. A notification shows progress — you can switch apps; restore keeps running\n" +
+                            "4. Wait for the success/failure dialog (large GPS history can take several minutes)",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -205,7 +207,7 @@ fun BackupScreen(
             if (state.isWorking) {
                 CircularProgressIndicator()
                 Text(
-                    "Working… Keep RoamAtlas open until the result dialog appears.",
+                    "Working in the background… Check the notification. Switching apps is OK.",
                     fontWeight = FontWeight.SemiBold
                 )
                 state.progressMessage?.let {

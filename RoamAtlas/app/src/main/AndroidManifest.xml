@@ -7,11 +7,13 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     
-    <!-- For foreground service (GPS tracking) -->
+    <!-- For foreground service (GPS tracking + backup restore) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     
     <!-- For file picker (Timeline import) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
@@ -94,6 +96,13 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!-- Encrypted backup / restore — keeps running if user leaves the app -->
+        <service
+            android:name=".data.backup.BackupForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

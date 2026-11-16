@@ -310,6 +310,6 @@ class EncryptedBackupManager @Inject constructor(
         private const val KEY_BITS = 256
         private const val PBKDF2_ITERATIONS = 210_000
         private const val MIN_PASSWORD_LENGTH = 12
-        private const val PAGE_SIZE = 500
+        private const val PAGE_SIZE = 2_000
     }
 }
