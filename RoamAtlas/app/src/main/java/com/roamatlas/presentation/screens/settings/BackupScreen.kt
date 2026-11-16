@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -46,29 +47,61 @@ fun BackupScreen(
     viewModel: BackupViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    var restoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var pendingRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(viewModel::export) }
+    // GetContent is more reliable on Samsung when returning from Files/Drive.
     val restoreLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> restoreUri = uri }
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            pendingRestoreUri = uri
+        }
+    }
 
-    restoreUri?.let { uri ->
+    if (state.showResultDialog && state.message != null) {
         AlertDialog(
-            onDismissRequest = { restoreUri = null },
+            onDismissRequest = viewModel::dismissResultDialog,
+            title = {
+                Text(if (state.isError) "Backup failed" else "Backup complete")
+            },
+            text = { Text(state.message!!) },
+            confirmButton = {
+                Button(onClick = viewModel::dismissResultDialog) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    pendingRestoreUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!state.isWorking) pendingRestoreUri = null
+            },
             title = { Text("Replace current RoamAtlas data?") },
             text = {
-                Text("Restore replaces locations, flights, trackers, trips and settings. This cannot be undone.")
+                Text(
+                    "Restore replaces locations, flights, trackers, trips and settings with this backup. " +
+                        "RoamAtlas will copy the file first, so switching apps during restore is safer."
+                )
             },
             confirmButton = {
-                Button(onClick = {
-                    restoreUri = null
-                    viewModel.restore(uri)
-                }) { Text("Restore") }
+                Button(
+                    onClick = {
+                        val chosen = uri
+                        pendingRestoreUri = null
+                        viewModel.restore(chosen)
+                    },
+                    enabled = !state.isWorking
+                ) { Text("Restore now") }
             },
             dismissButton = {
-                TextButton(onClick = { restoreUri = null }) { Text("Cancel") }
+                TextButton(
+                    onClick = { pendingRestoreUri = null },
+                    enabled = !state.isWorking
+                ) { Text("Cancel") }
             }
         )
     }
@@ -78,7 +111,7 @@ fun BackupScreen(
             TopAppBar(
                 title = { Text("Encrypted backup") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = onNavigateBack, enabled = !state.isWorking) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -90,16 +123,35 @@ fun BackupScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "Backups use AES-256 encryption and include locations, flights, trackers, trips and settings. Keep the password somewhere safe—RoamAtlas cannot recover it.",
-                    modifier = Modifier.padding(16.dp)
-                )
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Backups use AES-256 encryption and include locations, flights, trackers, trips and settings.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "1. Type your backup password\n" +
+                            "2. Tap Restore and pick the .rabackup file\n" +
+                            "3. Wait for the success dialog — keep RoamAtlas open until then",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
             OutlinedTextField(
                 value = state.password,
                 onValueChange = viewModel::setPassword,
                 label = { Text("Backup password") },
-                supportingText = { Text("At least 12 characters for a new backup") },
+                supportingText = {
+                    Text(
+                        if (state.password.isEmpty()) {
+                            "Required for restore. New backups need at least 12 characters."
+                        } else {
+                            "Password entered · Restore is unlocked"
+                        }
+                    )
+                },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 enabled = !state.isWorking,
@@ -116,9 +168,7 @@ fun BackupScreen(
                 Text(" Export encrypted backup")
             }
             OutlinedButton(
-                onClick = {
-                    restoreLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                },
+                onClick = { restoreLauncher.launch("*/*") },
                 enabled = !state.isWorking && state.password.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -127,15 +177,23 @@ fun BackupScreen(
             }
             if (state.isWorking) {
                 CircularProgressIndicator()
-                Text("Working… Keep RoamAtlas open.")
-            }
-            state.message?.let {
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    it,
-                    color = if (state.isError) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary
+                    "Working… Keep RoamAtlas open until the result dialog appears.",
+                    fontWeight = FontWeight.SemiBold
                 )
+                state.progressMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (!state.showResultDialog) {
+                state.message?.let {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        it,
+                        color = if (state.isError) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
