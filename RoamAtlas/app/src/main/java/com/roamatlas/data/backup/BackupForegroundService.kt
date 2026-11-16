@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.roamatlas.MainActivity
 import com.roamatlas.R
+import com.roamatlas.data.photo.MissingPhotoCleaner
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ class BackupForegroundService : Service() {
 
     @Inject lateinit var manager: EncryptedBackupManager
     @Inject lateinit var jobController: BackupJobController
+    @Inject lateinit var missingPhotoCleaner: MissingPhotoCleaner
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running = false
@@ -74,8 +76,25 @@ class BackupForegroundService : Service() {
                         percent = progress.percent
                     )
                 }
+                jobController.updateProgress(
+                    BackupProgress("Checking restored photos…", 98)
+                )
+                updateNotification(
+                    title = "Restoring backup",
+                    text = "98% · Checking restored photos…",
+                    percent = 98
+                )
+                val missing = runCatching { missingPhotoCleaner.cleanup() }.getOrNull()
+                val missingNote = if (missing != null && !missing.isEmpty) {
+                    "\n\n${missing.totalCleared} photo link${if (missing.totalCleared == 1) "" else "s"} " +
+                        "pointed to files that are not on this phone (${missing.summary}). " +
+                        "Those places stay on your map and timeline; only the missing image links were cleared. " +
+                        "Create a new backup from a phone that still has the photos to keep them next time."
+                } else {
+                    ""
+                }
                 jobController.complete(
-                    message = "Restore successful.\n\n${result.summary}.\n\nOpen Dashboard to see your data.",
+                    message = "Restore successful.\n\n${result.summary}.$missingNote\n\nOpen Dashboard to see your data.",
                     isError = false
                 )
                 updateNotification("Restore complete", result.summary, 100)

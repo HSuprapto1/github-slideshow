@@ -351,6 +351,16 @@ interface LocationDao {
     @Query("SELECT * FROM locations WHERE id > :afterId ORDER BY id ASC LIMIT :limit")
     suspend fun getPage(afterId: Long, limit: Int): List<LocationEntity>
 
+    @Query(
+        """
+        SELECT * FROM locations
+        WHERE (photoUri IS NOT NULL AND photoUri != '')
+           OR (originalPhotoUri IS NOT NULL AND originalPhotoUri != '')
+        ORDER BY id ASC
+        """
+    )
+    suspend fun getLocationsWithAnyPhoto(): List<LocationEntity>
+
     @Query("""
         SELECT countryCode FROM locations
         WHERE timestampMillis BETWEEN :startMillis AND :endMillis
