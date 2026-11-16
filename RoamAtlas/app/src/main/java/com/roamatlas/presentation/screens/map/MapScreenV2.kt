@@ -731,32 +731,40 @@ private fun openInGoogleMaps(
     longitude: Double,
     label: String?
 ) {
-    val queryLabel = label?.takeIf { it.isNotBlank() }
-    val query = buildString {
-        append(latitude)
-        append(',')
-        append(longitude)
-        if (queryLabel != null) {
-            append(" (")
-            append(queryLabel)
-            append(')')
-        }
+    // Drop an exact pin at lat/lng. Do not append a place name to a search query —
+    // that makes Google Maps geocode/partial-match and lose the RoamAtlas point.
+    val pinLabel = label
+        ?.replace('(', ' ')
+        ?.replace(')', ' ')
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+    val q = if (pinLabel != null) {
+        "$latitude,$longitude(${Uri.encode(pinLabel)})"
+    } else {
+        "$latitude,$longitude"
     }
-    val httpsUri = Uri.parse(
-        "https://www.google.com/maps/search/?api=1&query=${Uri.encode(query)}"
-    )
-    val mapsIntent = Intent(Intent.ACTION_VIEW, httpsUri).apply {
+    val geoUri = Uri.parse("geo:$latitude,$longitude?q=$q")
+    val httpsUri = Uri.parse("https://www.google.com/maps?q=$latitude,$longitude")
+
+    val mapsIntent = Intent(Intent.ACTION_VIEW, geoUri).apply {
         setPackage("com.google.android.apps.maps")
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     val launched = runCatching { context.startActivity(mapsIntent) }.isSuccess
     if (!launched) {
-        runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, httpsUri).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            )
+        val httpsMaps = Intent(Intent.ACTION_VIEW, httpsUri).apply {
+            setPackage("com.google.android.apps.maps")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val httpsOk = runCatching { context.startActivity(httpsMaps) }.isSuccess
+        if (!httpsOk) {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, httpsUri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            }
         }
     }
 }
