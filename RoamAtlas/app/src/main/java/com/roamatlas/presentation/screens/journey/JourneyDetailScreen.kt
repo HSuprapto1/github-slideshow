@@ -93,7 +93,7 @@ import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.presentation.components.PhotoAttachmentSection
 import com.roamatlas.presentation.components.PhotoFullScreenViewer
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
-import com.roamatlas.presentation.util.finalizeGalleryCameraPhoto
+import com.roamatlas.presentation.util.publishCapturedPhotoToGallery
 import java.io.File
 import java.text.SimpleDateFormat
 import java.time.Instant
@@ -815,13 +815,13 @@ private fun FlightLegCard(
         contract = ActivityResultContracts.TakePicture()
     ) { saved ->
         val uri = pendingCameraUri
+        pendingCameraUri = null
         if (saved && uri != null) {
-            finalizeGalleryCameraPhoto(context, uri)
-            onSetTicketPhoto(uri)
+            val galleryUri = publishCapturedPhotoToGallery(context, uri)
+            onSetTicketPhoto(galleryUri)
         } else if (uri != null) {
             runCatching { context.contentResolver.delete(uri, null, null) }
         }
-        pendingCameraUri = null
     }
     fun launchCamera() {
         val uri = createPlaceCameraPhotoUri(context) ?: run {

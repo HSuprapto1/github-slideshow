@@ -10,7 +10,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
-import com.roamatlas.presentation.util.finalizeGalleryCameraPhoto
+import com.roamatlas.presentation.util.publishCapturedPhotoToGallery
 import java.io.File
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -106,9 +106,10 @@ fun CityDetailScreen(
         ActivityResultContracts.TakePicture()
     ) { saved ->
         val uri = pendingCameraUri
+        pendingCameraUri = null
         if (saved && uri != null) {
-            finalizeGalleryCameraPhoto(context, uri)
-            viewModel.addPhotos(listOf(uri.toString()))
+            val galleryUri = publishCapturedPhotoToGallery(context, uri)
+            viewModel.addPhotos(listOf(galleryUri.toString()))
             Toast.makeText(
                 context,
                 "Photo saved to Gallery and this place",
@@ -120,7 +121,6 @@ fun CityDetailScreen(
                 context.contentResolver.delete(uri, null, null)
             }
         }
-        pendingCameraUri = null
     }
     fun launchCamera() {
         val uri = createPlaceCameraPhotoUri(context)

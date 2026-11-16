@@ -41,7 +41,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.roamatlas.data.photo.CapturedPhotoLocation
 import com.roamatlas.presentation.util.createPlaceCameraPhotoUri
-import com.roamatlas.presentation.util.finalizeGalleryCameraPhoto
+import com.roamatlas.presentation.util.publishCapturedPhotoToGallery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -142,19 +142,21 @@ fun AddPhotoToTimelineDialog(
             if (uri != null) runCatching { context.contentResolver.delete(uri, null, null) }
             return@rememberLauncherForActivityResult
         }
-        finalizeGalleryCameraPhoto(context, uri)
         waitingForLocation = true
         scope.launch {
+            val galleryUri = withContext(Dispatchers.IO) {
+                publishCapturedPhotoToGallery(context, uri)
+            }
             val capture = withContext(Dispatchers.IO) {
                 readCurrentLocation(context)
             }
             waitingForLocation = false
             if (capture == null) {
-                // Photo is already in Gallery; ask for a location so it still lands in Photos.
-                onCaptureNeedsLocation(uri)
+                // Photo is in Gallery (or app storage); ask for a location for Photos/timeline.
+                onCaptureNeedsLocation(galleryUri)
                 return@launch
             }
-            onImportCaptured(uri, capture)
+            onImportCaptured(galleryUri, capture)
         }
     }
 
@@ -229,10 +231,10 @@ fun AddPhotoToTimelineDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Load geotagged photos or take a new picture. Taken photos are saved to your " +
-                        "phone Gallery (Pictures/RoamAtlas). RoamAtlas keeps a thumbnail on the " +
-                        "timeline / Photos tab using GPS, or asks you to place the photo if GPS " +
-                        "is unavailable.",
+                    "Load geotagged photos or take a new picture. After you shoot, the photo is " +
+                        "copied into your phone Gallery (Pictures/RoamAtlas) and a thumbnail is " +
+                        "added to the timeline / Photos tab using GPS — or you’ll be asked to " +
+                        "place it if GPS is unavailable.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 if (isImporting || waitingForLocation) {
