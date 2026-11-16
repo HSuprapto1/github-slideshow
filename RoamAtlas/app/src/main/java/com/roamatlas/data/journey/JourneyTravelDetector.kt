@@ -4,9 +4,11 @@ import android.util.Log
 import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.geo.GeoDistance
 import com.roamatlas.data.local.dao.FlightDao
+import com.roamatlas.data.local.dao.MapPlaceDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
 import com.roamatlas.data.local.entity.JourneyStatus
+import com.roamatlas.data.local.entity.MapPlaceEntity
 import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.data.local.entity.TripEntity
@@ -18,12 +20,14 @@ import javax.inject.Singleton
 
 /**
  * Infers journey progress from GPS near departure/arrival airports,
- * including airplane-mode gaps (leave dep → appear at arr).
+ * including airplane-mode gaps (leave dep → appear at arr), soft nudges
+ * while still traveling, and saved-place arrival suggestions.
  */
 @Singleton
 class JourneyTravelDetector @Inject constructor(
     private val tripDao: TripDao,
     private val flightDao: FlightDao,
+    private val mapPlaceDao: MapPlaceDao,
     private val airportRepository: AirportRepository,
     private val notifier: JourneyTravelNotifier
 ) {
@@ -54,10 +58,18 @@ class JourneyTravelDetector @Inject constructor(
         }.onFailure { Log.w(TAG, "Journey recheck failed", it) }
     }
 
+    fun suggestedArrivalPlace(journeyId: Long): String? =
+        notifier.getSuggestedArrivalPlace(journeyId)
+
+    fun clearSuggestedArrivalPlace(journeyId: Long) {
+        notifier.clearSuggestedArrivalPlace(journeyId)
+    }
+
     private suspend fun process(location: LocationRecord) {
         val now = location.timestamp.toEpochMilli()
         val journeys = tripDao.getActiveJourneys()
         if (journeys.isEmpty()) return
+        val savedPlaces = mapPlaceDao.getAllSnapshot()
 
         journeys.forEach { trip ->
             val legs = flightDao.getFlightsForJourneySnapshot(trip.id)
@@ -66,8 +78,19 @@ class JourneyTravelDetector @Inject constructor(
                     compareBy<FlightEntity> { it.journeySequence ?: Int.MAX_VALUE }
                         .thenBy { it.departureTimeMillis }
                 )
-            if (legs.isEmpty()) return@forEach
-            processJourney(trip, legs, location.latitude, location.longitude, now, location.isAirborne)
+            if (legs.isEmpty()) {
+                maybeSoftNudgeStillTraveling(trip, emptyList(), now)
+                return@forEach
+            }
+            processJourney(
+                trip = trip,
+                legs = legs,
+                lat = location.latitude,
+                lon = location.longitude,
+                now = now,
+                isAirborne = location.isAirborne,
+                savedPlaces = savedPlaces
+            )
         }
     }
 
@@ -77,7 +100,8 @@ class JourneyTravelDetector @Inject constructor(
         lat: Double,
         lon: Double,
         now: Long,
-        isAirborne: Boolean
+        isAirborne: Boolean,
+        savedPlaces: List<MapPlaceEntity>
     ) {
         var journeyTouched = false
         legs.forEachIndexed { index, leg ->
@@ -85,6 +109,9 @@ class JourneyTravelDetector @Inject constructor(
             if (status == TravelLegStatus.SKIPPED || status == TravelLegStatus.MISSED) return@forEachIndexed
             val dismissedUntil = leg.detectionDismissedUntilMillis ?: 0L
             if (dismissedUntil > now) return@forEachIndexed
+
+            // Ground legs use place names, not airport DB codes — skip airport geofence.
+            if (TransportMode.isGround(leg.transportMode)) return@forEachIndexed
 
             val dep = airportRepository.findByCode(leg.departureAirportCode) ?: return@forEachIndexed
             val arrCode = leg.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
@@ -105,7 +132,6 @@ class JourneyTravelDetector @Inject constructor(
                 return@forEachIndexed
             }
 
-            // Airborne while journey active → in the air
             if (isAirborne &&
                 journeyInProgress &&
                 status in setOf(
@@ -125,7 +151,6 @@ class JourneyTravelDetector @Inject constructor(
                 return@forEachIndexed
             }
 
-            // Missed connection: previous leg arrived, this dep time passed, still at the hub
             if (index > 0 && !isAirborne) {
                 val prev = legs[index - 1]
                 val prevStatus = TravelLegStatus.normalize(prev.travelLegStatus)
@@ -162,7 +187,6 @@ class JourneyTravelDetector @Inject constructor(
                 }
             }
 
-            // Still at departure after scheduled time → delayed
             if (!isAirborne && nearDep && now > scheduledDep + DELAY_AFTER_MS &&
                 status !in setOf(
                     TravelLegStatus.ARRIVED,
@@ -186,7 +210,6 @@ class JourneyTravelDetector @Inject constructor(
                 return@forEachIndexed
             }
 
-            // At departure airport
             if (!isAirborne && nearDep &&
                 status in setOf(TravelLegStatus.PLANNED, TravelLegStatus.DIVERTED)
             ) {
@@ -203,7 +226,6 @@ class JourneyTravelDetector @Inject constructor(
                 return@forEachIndexed
             }
 
-            // Arrival / airplane-mode recovery: appear near arrival after leaving / in progress
             val canArrive = status in setOf(
                 TravelLegStatus.AT_DEPARTURE,
                 TravelLegStatus.DEPARTED,
@@ -235,11 +257,15 @@ class JourneyTravelDetector @Inject constructor(
                     journeyId = trip.id
                 )
                 journeyTouched = true
-                // Do not auto-complete the journey: airport arrival is often not the
-                // final destination (taxi/train to office, home, warehouse, port, etc.).
                 notifyBookedLegsDoneIfNeeded(trip)
             }
         }
+
+        maybeSoftNudgeStillTraveling(trip, legs, now)
+        if (!isAirborne) {
+            maybeSuggestSavedPlaceArrival(trip, legs, lat, lon, now, savedPlaces)
+        }
+
         if (journeyTouched) {
             Log.i(TAG, "Updated travel detection for journey ${trip.id}")
         }
@@ -273,6 +299,78 @@ class JourneyTravelDetector @Inject constructor(
                 append("Journey stays in progress so GPS and photos still count. ")
                 append("Add a ground leg if you like, then tap “I’ve arrived at my destination” when done.")
             },
+            journeyId = trip.id
+        )
+    }
+
+    private suspend fun maybeSoftNudgeStillTraveling(
+        trip: TripEntity,
+        legs: List<FlightEntity>,
+        now: Long
+    ) {
+        val status = JourneyStatus.normalize(trip.journeyStatus)
+        if (status != JourneyStatus.IN_PROGRESS && status != JourneyStatus.PLANNED) return
+        if (legs.isEmpty()) return
+        val allSettled = legs.all {
+            val s = TravelLegStatus.normalize(it.travelLegStatus)
+            s == TravelLegStatus.ARRIVED || s == TravelLegStatus.MISSED || s == TravelLegStatus.SKIPPED
+        }
+        if (!allSettled) return
+        val lastArrival = legs.mapNotNull { leg ->
+            leg.actualArrivalMillis
+                ?: if (TravelLegStatus.normalize(leg.travelLegStatus) == TravelLegStatus.ARRIVED) {
+                    leg.estimatedArrivalTimeMillis ?: leg.arrivalTimeMillis
+                } else {
+                    null
+                }
+        }.maxOrNull() ?: return
+        if (now < lastArrival + STILL_TRAVELING_NUDGE_MS) return
+        ensureJourneyInProgress(trip)
+        notifier.notifyOnce(
+            key = "still_traveling_${trip.id}",
+            title = "Still traveling? · ${trip.name}",
+            text = "Booked legs finished a while ago. GPS and photos are still on this journey. " +
+                "Tap “I’ve arrived at my destination” when you’re done, or add a ground leg.",
+            journeyId = trip.id
+        )
+    }
+
+    private suspend fun maybeSuggestSavedPlaceArrival(
+        trip: TripEntity,
+        legs: List<FlightEntity>,
+        lat: Double,
+        lon: Double,
+        now: Long,
+        savedPlaces: List<MapPlaceEntity>
+    ) {
+        if (savedPlaces.isEmpty()) return
+        val status = JourneyStatus.normalize(trip.journeyStatus)
+        if (status != JourneyStatus.IN_PROGRESS && status != JourneyStatus.PLANNED) return
+        val allSettled = legs.isNotEmpty() && legs.all {
+            val s = TravelLegStatus.normalize(it.travelLegStatus)
+            s == TravelLegStatus.ARRIVED || s == TravelLegStatus.MISSED || s == TravelLegStatus.SKIPPED
+        }
+        // Prefer after booked legs settle; also allow if any flight already arrived.
+        val anyFlightArrived = legs.any {
+            TransportMode.isFlight(it.transportMode) &&
+                TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.ARRIVED
+        }
+        if (!allSettled && !anyFlightArrived) return
+
+        val match = savedPlaces.mapNotNull { place ->
+            val distM = GeoDistance.haversineMeters(lat, lon, place.latitude, place.longitude)
+            val radius = (place.radiusMeters?.toDouble() ?: DEFAULT_PLACE_RADIUS_M)
+                .coerceAtLeast(MIN_PLACE_RADIUS_M)
+            if (distM <= radius) place to distM else null
+        }.minByOrNull { it.second }?.first ?: return
+
+        notifier.setSuggestedArrivalPlace(trip.id, match.name, match.id)
+        ensureJourneyInProgress(trip)
+        notifier.notifyOnce(
+            key = "place_${trip.id}_${match.id}",
+            title = "Near ${match.name} · ${trip.name}",
+            text = "Looks like you reached a saved place. Open the journey and confirm " +
+                "“I’ve arrived at my destination” if this is the end.",
             journeyId = trip.id
         )
     }
@@ -313,5 +411,8 @@ class JourneyTravelDetector @Inject constructor(
         private const val POST_WINDOW_MS = 10L * 60L * 60L * 1000L
         private const val DELAY_AFTER_MS = 90L * 60L * 1000L
         private const val MISSED_AFTER_MS = 45L * 60L * 1000L
+        private const val STILL_TRAVELING_NUDGE_MS = 6L * 60L * 60L * 1000L
+        private const val DEFAULT_PLACE_RADIUS_M = 250.0
+        private const val MIN_PLACE_RADIUS_M = 80.0
     }
 }

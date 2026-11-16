@@ -39,6 +39,9 @@ data class JourneyDetailUiState(
     val airports: Map<String, Airport> = emptyMap(),
     val gpsTrack: List<LocationRecord> = emptyList(),
     val timelinePhotos: List<LocationRecord> = emptyList(),
+    val photosSinceAirport: List<LocationRecord> = emptyList(),
+    val showPhotosSinceAirportPrompt: Boolean = false,
+    val suggestedArrivalPlace: String? = null,
     val journeyDays: List<JourneyDaySummary> = emptyList(),
     val trackedDayCount: Int = 0,
     val showGpsTrack: Boolean = true,
@@ -86,9 +89,17 @@ class JourneyDetailViewModel @Inject constructor(
                         it.actualArrivalAirportCode
                     )
                 }.filterNotNull()
+                val suggested = journey?.let {
+                    if (!it.isCompleted && !it.isCancelled) {
+                        journeyTravelDetector.suggestedArrivalPlace(journeyId)
+                    } else {
+                        null
+                    }
+                }
                 _uiState.value = _uiState.value.copy(
                     journey = journey,
                     airports = airportRepository.getByIataCodes(codes),
+                    suggestedArrivalPlace = suggested,
                     isLoading = false,
                     errorMessage = if (journey == null) "Journey not found." else null
                 )
@@ -229,8 +240,51 @@ class JourneyDetailViewModel @Inject constructor(
     fun markJourneyCompleted() {
         viewModelScope.launch {
             journeyRepository.setJourneyStatus(journeyId, "COMPLETED")
+            journeyTravelDetector.clearSuggestedArrivalPlace(journeyId)
             _uiState.value = _uiState.value.copy(
+                suggestedArrivalPlace = null,
+                showPhotosSinceAirportPrompt = false,
                 message = "Arrived at destination · journey completed. GPS after this won’t attach here."
+            )
+        }
+    }
+
+    fun dismissSuggestedArrivalPlace() {
+        journeyTravelDetector.clearSuggestedArrivalPlace(journeyId)
+        _uiState.value = _uiState.value.copy(suggestedArrivalPlace = null)
+    }
+
+    fun dismissPhotosSinceAirportPrompt() {
+        _uiState.value = _uiState.value.copy(showPhotosSinceAirportPrompt = false)
+    }
+
+    fun importPhotosSinceAirport() {
+        val photos = _uiState.value.photosSinceAirport
+        if (photos.isEmpty()) {
+            _uiState.value = _uiState.value.copy(
+                showPhotosSinceAirportPrompt = false,
+                message = "No new photos since the airport."
+            )
+            return
+        }
+        viewModelScope.launch {
+            var added = 0
+            photos.forEach { location ->
+                val uriString = location.originalPhotoUri?.takeIf { it.isNotBlank() }
+                    ?: location.photoUri?.takeIf { it.isNotBlank() }
+                if (uriString != null) {
+                    val ok = journeyRepository.addJourneyPhoto(journeyId, Uri.parse(uriString))
+                    if (ok) added++
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                showPhotosSinceAirportPrompt = false,
+                photosSinceAirport = emptyList(),
+                message = if (added > 0) {
+                    "Added $added photo${if (added == 1) "" else "s"} taken since the airport."
+                } else {
+                    "No new photos could be added."
+                }
             )
         }
     }
@@ -411,11 +465,35 @@ class JourneyDetailViewModel @Inject constructor(
                 locationRepository.countTrackedDays(startMillis, endExclusive)
             }.getOrDefault(days.size)
 
+            val album = refreshed.photoUris.toSet()
+            val airportMillis = refreshed.lastAirportArrivalMillis
+            val newSinceAirport = if (
+                airportMillis != null &&
+                !refreshed.isCompleted &&
+                !refreshed.isCancelled
+            ) {
+                photos.filter { location ->
+                    if (location.timestamp.toEpochMilli() < airportMillis) return@filter false
+                    val uri = location.originalPhotoUri?.takeIf { it.isNotBlank() }
+                        ?: location.photoUri?.takeIf { it.isNotBlank() }
+                    uri != null && uri !in album
+                }.sortedBy { it.timestamp }
+            } else {
+                emptyList()
+            }
+
             _uiState.value = _uiState.value.copy(
                 gpsTrack = gps.sortedBy { it.timestamp },
                 timelinePhotos = photos.sortedBy { it.timestamp },
+                photosSinceAirport = newSinceAirport,
+                showPhotosSinceAirportPrompt = newSinceAirport.isNotEmpty(),
                 journeyDays = days,
-                trackedDayCount = trackedDays
+                trackedDayCount = trackedDays,
+                suggestedArrivalPlace = if (!refreshed.isCompleted && !refreshed.isCancelled) {
+                    journeyTravelDetector.suggestedArrivalPlace(journeyId)
+                } else {
+                    null
+                }
             )
         }
     }

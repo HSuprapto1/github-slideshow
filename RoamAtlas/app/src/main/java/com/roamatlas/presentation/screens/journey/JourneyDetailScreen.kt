@@ -177,6 +177,24 @@ fun JourneyDetailScreen(
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
                 item { JourneyHeader(value, state.nowMillis) }
+                state.suggestedArrivalPlace?.let { placeName ->
+                    item {
+                        SuggestedArrivalPlaceCard(
+                            placeName = placeName,
+                            onConfirm = viewModel::markJourneyCompleted,
+                            onDismiss = viewModel::dismissSuggestedArrivalPlace
+                        )
+                    }
+                }
+                if (state.showPhotosSinceAirportPrompt && state.photosSinceAirport.isNotEmpty()) {
+                    item {
+                        PhotosSinceAirportCard(
+                            count = state.photosSinceAirport.size,
+                            onAdd = viewModel::importPhotosSinceAirport,
+                            onDismiss = viewModel::dismissPhotosSinceAirportPrompt
+                        )
+                    }
+                }
                 item { JourneyTravelSummaryCard(value) }
                 item {
                     JourneyStatusActions(
@@ -560,6 +578,76 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
 }
 
 @Composable
+private fun SuggestedArrivalPlaceCard(
+    placeName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Near saved place · $placeName",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "GPS matches one of your map places. Confirm if this is your final destination.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
+                    Text("I’ve arrived here")
+                }
+                TextButton(onClick = onDismiss) { Text("Not yet") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotosSinceAirportCard(
+    count: Int,
+    onAdd: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "$count new photo${if (count == 1) "" else "s"} since the airport",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Add them to this trip album? They’re still in your timeline.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAdd, modifier = Modifier.weight(1f)) {
+                    Text("Add to trip")
+                }
+                TextButton(onClick = onDismiss) { Text("Not now") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
     val summary = journey.travelSummary
     if (journey.travelLegs.isEmpty()) return
@@ -574,13 +662,28 @@ private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Airport GPS detection, airplane-mode recovery, and ground travel after the last flight " +
-                    "while the journey is still in progress.",
+                "Split into air and ground after the last airport while the journey is still open.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            summary.highlightLines.forEach { line ->
+            Text("Overall", fontWeight = FontWeight.SemiBold)
+            summary.highlightLines
+                .filterNot { line ->
+                    summary.airHighlightLines.contains(line) ||
+                        summary.groundHighlightLines.contains(line)
+                }
+                .forEach { line ->
+                    Text(line, style = MaterialTheme.typography.bodyMedium)
+                }
+            Text("Air", fontWeight = FontWeight.SemiBold)
+            summary.airHighlightLines.forEach { line ->
                 Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (summary.groundHighlightLines.isNotEmpty()) {
+                Text("Ground / after airport", fontWeight = FontWeight.SemiBold)
+                summary.groundHighlightLines.forEach { line ->
+                    Text(line, style = MaterialTheme.typography.bodyMedium)
+                }
             }
             if (journey.stillTravelingAfterBookedLegs) {
                 Text(

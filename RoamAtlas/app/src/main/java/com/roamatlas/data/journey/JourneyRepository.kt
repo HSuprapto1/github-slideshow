@@ -37,12 +37,20 @@ data class JourneyTravelSummary(
     val actualAirOrTransitMinutes: Long?,
     val scheduledLayoverMinutes: Long,
     val actualLayoverMinutes: Long?,
+    val scheduledAirMinutes: Long,
+    val actualAirMinutes: Long?,
+    val scheduledGroundMinutes: Long,
+    val actualGroundMinutes: Long?,
+    /** Ground / waiting time after the last airport arrival (to now or last ground arrival). */
+    val afterAirportMinutes: Long?,
     val legsArrived: Int,
     val legsMissed: Int,
     val legsSkipped: Int,
     val legsDelayed: Int,
     val legsDiverted: Int,
     val recoveredGapLegs: Int,
+    val airHighlightLines: List<String>,
+    val groundHighlightLines: List<String>,
     val highlightLines: List<String>
 )
 
@@ -128,6 +136,25 @@ data class JourneyWithFlights(
 
     val stillTravelingAfterBookedLegs: Boolean
         get() = !isCancelled && !isCompleted && bookedLegsSettled
+
+    val airLegs: List<FlightEntity>
+        get() = travelLegs.filter { TransportMode.isFlight(it.transportMode) }
+
+    val groundLegs: List<FlightEntity>
+        get() = travelLegs.filter { TransportMode.isGround(it.transportMode) }
+
+    /** Last known airport arrival time (actual if present). */
+    val lastAirportArrivalMillis: Long?
+        get() = airLegs
+            .mapNotNull { leg ->
+                leg.actualArrivalMillis
+                    ?: if (TravelLegStatus.normalize(leg.travelLegStatus) == TravelLegStatus.ARRIVED) {
+                        leg.estimatedArrivalTimeMillis ?: leg.arrivalTimeMillis
+                    } else {
+                        null
+                    }
+            }
+            .maxOrNull()
 
     val hotelCount: Int
         get() = flights.count { TransportMode.isHotel(it.transportMode) }
@@ -221,6 +248,58 @@ data class JourneyWithFlights(
                             (leg.estimatedDepartureTimeMillis ?: leg.departureTimeMillis)
                     )
             }
+            fun sumScheduled(subset: List<FlightEntity>): Long = subset.sumOf { leg ->
+                val dep = leg.estimatedDepartureTimeMillis ?: leg.departureTimeMillis
+                val arr = leg.estimatedArrivalTimeMillis ?: leg.arrivalTimeMillis
+                ((arr - dep) / 60_000).coerceAtLeast(0)
+            }
+            fun sumActual(subset: List<FlightEntity>): Long? {
+                val parts = subset.mapNotNull { leg ->
+                    val dep = leg.actualDepartureMillis ?: return@mapNotNull null
+                    val arr = leg.actualArrivalMillis ?: return@mapNotNull null
+                    if (arr < dep) null else ((arr - dep) / 60_000).coerceAtLeast(0)
+                }
+                return parts.takeIf { it.isNotEmpty() }?.sum()
+            }
+            val scheduledAir = sumScheduled(airLegs)
+            val actualAir = sumActual(airLegs)
+            val scheduledGround = sumScheduled(groundLegs)
+            val actualGround = sumActual(groundLegs)
+            val airportEnd = lastAirportArrivalMillis
+            val afterAirport = airportEnd?.let { start ->
+                val end = groundLegs.mapNotNull { it.actualArrivalMillis }.maxOrNull()
+                    ?: if (!isCompleted && !isCancelled) System.currentTimeMillis() else null
+                    ?: journey.updatedAtMillis
+                if (end >= start) ((end - start) / 60_000).coerceAtLeast(0) else null
+            }
+            val airLines = buildList {
+                if (airLegs.isEmpty()) {
+                    add("No flight legs.")
+                } else {
+                    add("Scheduled air · ${formatSummaryMinutes(scheduledAir)}")
+                    actualAir?.let { add("GPS air · ${formatSummaryMinutes(it)}") }
+                    add(
+                        "${airLegs.size} flight${if (airLegs.size == 1) "" else "s"} · " +
+                            "${airLegs.count { TravelLegStatus.normalize(it.travelLegStatus) == TravelLegStatus.ARRIVED }} arrived"
+                    )
+                }
+            }
+            val groundLines = buildList {
+                if (groundLegs.isNotEmpty()) {
+                    add("Scheduled ground · ${formatSummaryMinutes(scheduledGround)}")
+                    actualGround?.let { add("GPS ground · ${formatSummaryMinutes(it)}") }
+                    add(
+                        "${groundLegs.size} ground leg${if (groundLegs.size == 1) "" else "s"} " +
+                            "(taxi / train / bus / other)"
+                    )
+                }
+                afterAirport?.let {
+                    add("After last airport · ${formatSummaryMinutes(it)}")
+                }
+                if (groundLegs.isEmpty() && afterAirport == null && stillTravelingAfterBookedLegs) {
+                    add("Still traveling after airport — add a ground leg or mark arrived.")
+                }
+            }
             val lines = buildList {
                 if (legs.isEmpty()) {
                     add("No travel legs yet.")
@@ -228,8 +307,6 @@ data class JourneyWithFlights(
                 }
                 add("Scheduled door-to-door · ${formatSummaryMinutes(scheduledDoor)}")
                 actualDoor?.let { add("Actual door-to-door · ${formatSummaryMinutes(it)}") }
-                add("Scheduled in-transit · ${formatSummaryMinutes(scheduledTransit)}")
-                actualTransit?.let { add("GPS in-transit · ${formatSummaryMinutes(it)}") }
                 if (scheduledLayover > 0) {
                     add("Scheduled layovers · ${formatSummaryMinutes(scheduledLayover)}")
                 }
@@ -256,13 +333,20 @@ data class JourneyWithFlights(
                 actualAirOrTransitMinutes = actualTransit,
                 scheduledLayoverMinutes = scheduledLayover,
                 actualLayoverMinutes = actualLayover,
+                scheduledAirMinutes = scheduledAir,
+                actualAirMinutes = actualAir,
+                scheduledGroundMinutes = scheduledGround,
+                actualGroundMinutes = actualGround,
+                afterAirportMinutes = afterAirport,
                 legsArrived = arrived,
                 legsMissed = missed,
                 legsSkipped = skipped,
                 legsDelayed = delayed,
                 legsDiverted = diverted,
                 recoveredGapLegs = recovered,
-                highlightLines = lines
+                airHighlightLines = airLines,
+                groundHighlightLines = groundLines,
+                highlightLines = lines + airLines + groundLines
             )
         }
 

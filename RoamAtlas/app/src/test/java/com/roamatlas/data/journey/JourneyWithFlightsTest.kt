@@ -120,6 +120,8 @@ class JourneyWithFlightsTest {
         assertEquals(true, journey.bookedLegsSettled)
         assertEquals(true, journey.stillTravelingAfterBookedLegs)
         assertEquals("SIN", journey.lastSettledArrivalLabel)
+        assertEquals(true, journey.travelSummary.airHighlightLines.isNotEmpty())
+        assertEquals(true, journey.travelSummary.groundHighlightLines.isNotEmpty())
     }
 
     private fun flight(

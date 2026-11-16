@@ -52,6 +52,29 @@ class JourneyTravelNotifier @Inject constructor(
         prefs.edit().remove(key).apply()
     }
 
+    fun setSuggestedArrivalPlace(journeyId: Long, placeName: String, placeId: Long) {
+        prefs.edit()
+            .putString(suggestedPlaceKey(journeyId), placeName)
+            .putLong(suggestedPlaceIdKey(journeyId), placeId)
+            .apply()
+    }
+
+    fun getSuggestedArrivalPlace(journeyId: Long): String? =
+        prefs.getString(suggestedPlaceKey(journeyId), null)?.takeIf { it.isNotBlank() }
+
+    fun getSuggestedArrivalPlaceId(journeyId: Long): Long =
+        prefs.getLong(suggestedPlaceIdKey(journeyId), -1L)
+
+    fun clearSuggestedArrivalPlace(journeyId: Long) {
+        prefs.edit()
+            .remove(suggestedPlaceKey(journeyId))
+            .remove(suggestedPlaceIdKey(journeyId))
+            .apply()
+    }
+
+    private fun suggestedPlaceKey(journeyId: Long) = "suggested_place_$journeyId"
+    private fun suggestedPlaceIdKey(journeyId: Long) = "suggested_place_id_$journeyId"
+
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
