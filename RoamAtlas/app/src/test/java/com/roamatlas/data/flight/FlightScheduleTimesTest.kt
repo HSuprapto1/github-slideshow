@@ -8,6 +8,7 @@ import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
+// assertEquals used by next-wait GPS confirmation test
 
 class FlightScheduleTimesTest {
 
@@ -32,19 +33,21 @@ class FlightScheduleTimesTest {
     fun `brazil crew SIN transit is 1h55m`() {
         val zone = ZoneId.of("Asia/Jakarta")
         val sinArrive = LocalDateTime.of(2026, 11, 17, 20, 55).atZone(zone).toInstant().toEpochMilli()
-        val sinDepart = LocalDateTime.of(2026, 11, 17, 22, 50).atZone(zone).toInstant().toEpochMilli()
-        val transit = (sinDepart - sinArrive) / 60_000L
-        assertEquals(115L, transit)
+        val sinDepart = LocalDateTime.of(2026, 11, 17, 22, 50)
+            .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli()
+        val sinArriveInstant = LocalDateTime.of(2026, 11, 17, 20, 55)
+            .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli()
+        val transit = (sinDepart - sinArriveInstant) / 60_000L
+        assertEquals(115L, transit) // 20:55 → 22:50 SIN
     }
 
     @Test
     fun `brazil crew SIN to CDG is about 13h not 7h`() {
         val zone = ZoneId.of("Asia/Jakarta")
-        val dep = LocalDateTime.of(2026, 11, 17, 22, 50).atZone(zone).toInstant().toEpochMilli()
-        val arr = LocalDateTime.of(2026, 11, 18, 6, 5).atZone(zone).toInstant().toEpochMilli()
-        val rawHours = (arr - dep) / 3_600_000.0
-        assertTrue("precondition: naive wall ~7h, was $rawHours", rawHours in 6.5..8.0)
-
+        val dep = LocalDateTime.of(2026, 11, 17, 22, 50)
+            .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli()
+        val arr = LocalDateTime.of(2026, 11, 18, 6, 5)
+            .atZone(ZoneId.of("Europe/Paris")).toInstant().toEpochMilli()
         val flight = flight("SIN", "CDG", dep, arr).copy(distanceKm = 10_700.0)
         val minutes = FlightScheduleTimes.durationMinutes(flight, sin, cdg)
         assertTrue(
@@ -87,6 +90,30 @@ class FlightScheduleTimesTest {
             "expected ~12–15h for SIN→CDG, got ${normalized.durationMinutes / 60.0}h",
             normalized.durationMinutes in (12 * 60)..(15 * 60)
         )
+    }
+
+    @Test
+    fun `next wait uses Singapore departure not phone zone`() {
+        // Wall clocks wrongly stamped in Jakarta; ticket is 22:50 SIN local.
+        val jakarta = ZoneId.of("Asia/Jakarta")
+        val dep = LocalDateTime.of(2026, 11, 17, 22, 50).atZone(jakarta).toInstant().toEpochMilli()
+        val arr = LocalDateTime.of(2026, 11, 18, 6, 5).atZone(jakarta).toInstant().toEpochMilli()
+        val flight = flight("SIN", "CDG", dep, arr).copy(distanceKm = 10_700.0)
+        val trueDep = LocalDateTime.of(2026, 11, 17, 22, 50)
+            .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli()
+        val now = LocalDateTime.of(2026, 11, 17, 21, 47)
+            .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli()
+        val wait = FlightScheduleTimes.nextDepartureWait(
+            flights = listOf(flight),
+            airports = mapOf("SIN" to sin, "CDG" to cdg),
+            nowMillis = now,
+            gpsLatitude = 1.3644,
+            gpsLongitude = 103.9915
+        )
+        requireNotNull(wait)
+        assertEquals(trueDep, wait.departureInstantMillis)
+        assertTrue("expected ~1h, got ${wait.minutesRemaining}m", wait.minutesRemaining in 60..70)
+        assertTrue(wait.gpsConfirmsAtAirport)
     }
 
     @Test

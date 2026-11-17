@@ -2,8 +2,12 @@ package com.roamatlas.presentation.screens.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.airport.AirportRepository
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.journey.JourneyWithFlights
+import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.photo.CapturedPhotoLocation
 import com.roamatlas.data.photo.PhotoTimelineImporter
 import android.net.Uri
@@ -53,6 +57,10 @@ data class DashboardUiStateV2(
     val trackerPendingDelete: DayTracker? = null,
     val countries: List<Pair<String, String>> = emptyList(),
     val upcomingJourney: JourneyWithFlights? = null,
+    val upcomingAirports: Map<String, Airport> = emptyMap(),
+    val nextDepartureWait: FlightScheduleTimes.NextDepartureWait? = null,
+    val currentLatitude: Double? = null,
+    val currentLongitude: Double? = null,
     val nowMillis: Long = System.currentTimeMillis(),
     val errorMessage: String? = null
 )
@@ -72,6 +80,8 @@ class DashboardViewModelV2 @Inject constructor(
     private val travelStatisticsRepository: TravelStatisticsRepository,
     private val dayOverrideRepository: DayOverrideRepository,
     private val journeyRepository: JourneyRepository,
+    private val airportRepository: AirportRepository,
+    private val locationDao: LocationDao,
     private val photoTimelineImporter: PhotoTimelineImporter
 ) : ViewModel() {
     
@@ -80,6 +90,9 @@ class DashboardViewModelV2 @Inject constructor(
     private val clock = MutableStateFlow(System.currentTimeMillis())
     
     init {
+        viewModelScope.launch {
+            runCatching { journeyRepository.repairAllTicketSchedules() }
+        }
         loadDashboardData()
         viewModelScope.launch {
             while (true) {
@@ -110,6 +123,24 @@ class DashboardViewModelV2 @Inject constructor(
                         .filterNot { it.isCancelled || it.isCompleted || it.isPast }
                         .filter { (it.finalArrivalMillis ?: Long.MIN_VALUE) >= data.now }
                         .minByOrNull { it.firstDepartureMillis ?: Long.MAX_VALUE }
+                    val codes = upcomingJourney?.flights.orEmpty().flatMap {
+                        listOf(it.departureAirportCode, it.arrivalAirportCode)
+                    }
+                    val airports = if (codes.isEmpty()) {
+                        emptyMap()
+                    } else {
+                        airportRepository.getByIataCodes(codes)
+                    }
+                    val gps = locationDao.getLatestLocation()
+                    val wait = upcomingJourney?.let { journey ->
+                        FlightScheduleTimes.nextDepartureWait(
+                            flights = journey.orderedFlights,
+                            airports = airports,
+                            nowMillis = data.now,
+                            gpsLatitude = gps?.latitude,
+                            gpsLongitude = gps?.longitude
+                        )
+                    }
                     val today = LocalDate.now()
                     val todayPoints = runCatching {
                         locationRepository.getLocationsForLocalDate(today).first()
@@ -131,6 +162,10 @@ class DashboardViewModelV2 @Inject constructor(
                         todayPointCount = todayCount,
                         todayCities = todayCities,
                         upcomingJourney = upcomingJourney,
+                        upcomingAirports = airports,
+                        nextDepartureWait = wait,
+                        currentLatitude = gps?.latitude,
+                        currentLongitude = gps?.longitude,
                         nowMillis = data.now,
                         errorMessage = null
                     )

@@ -39,7 +39,10 @@ class JourneyShareFormatterTest {
                 flight(1, "CGK", "SIN", "SQ963", "Singapore Airlines",
                     t(2026, 11, 17, 18, 10), t(2026, 11, 17, 20, 55)),
                 flight(2, "SIN", "CDG", "AF257", "Air France",
-                    t(2026, 11, 17, 22, 50), t(2026, 11, 18, 6, 5)),
+                    LocalDateTime.of(2026, 11, 17, 22, 50)
+                        .atZone(ZoneId.of("Asia/Singapore")).toInstant().toEpochMilli(),
+                    LocalDateTime.of(2026, 11, 18, 6, 5)
+                        .atZone(ZoneId.of("Europe/Paris")).toInstant().toEpochMilli()),
                 flight(3, "CDG", "GIG", "AF484", "Air France",
                     t(2026, 11, 18, 10, 55), t(2026, 11, 18, 18, 30))
             )

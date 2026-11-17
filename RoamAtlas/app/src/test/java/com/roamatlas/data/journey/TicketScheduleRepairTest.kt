@@ -40,9 +40,10 @@ class TicketScheduleRepairTest {
     }
 
     @Test
-    fun `share itinerary transit SIN is 1h55m`() {
-        val sinArr = LocalDateTime.of(2026, 11, 17, 20, 55).atZone(zone).toInstant().toEpochMilli()
-        val sinDep = LocalDateTime.of(2026, 11, 17, 22, 50).atZone(zone).toInstant().toEpochMilli()
-        assertEquals(115L, (sinDep - sinArr) / 60_000L)
+    fun `SIN to CDG departs 2250 Singapore local`() {
+        val sin = ZoneId.of("Asia/Singapore")
+        val sinArr = LocalDateTime.of(2026, 11, 17, 20, 55).atZone(sin).toInstant().toEpochMilli()
+        val sinDep = LocalDateTime.of(2026, 11, 17, 22, 50).atZone(sin).toInstant().toEpochMilli()
+        assertEquals(115L, (sinDep - sinArr) / 60_000L) // 1h 55m transit
     }
 }

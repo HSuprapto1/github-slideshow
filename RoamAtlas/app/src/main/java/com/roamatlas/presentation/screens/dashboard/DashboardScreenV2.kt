@@ -186,6 +186,8 @@ fun DashboardScreenV2(
                         UpcomingJourneyCard(
                             journey = it,
                             nowMillis = uiState.nowMillis,
+                            nextWait = uiState.nextDepartureWait,
+                            airports = uiState.upcomingAirports,
                             onClick = { onOpenJourney(it.journey.id) }
                         )
                     }
@@ -729,20 +731,15 @@ private fun TravelOverviewSection(
 private fun UpcomingJourneyCard(
     journey: JourneyWithFlights,
     nowMillis: Long,
+    nextWait: com.roamatlas.data.flight.FlightScheduleTimes.NextDepartureWait?,
+    airports: Map<String, com.roamatlas.data.airport.Airport>,
     onClick: () -> Unit
 ) {
-    val firstDeparture = journey.firstDepartureMillis
-    val nextFlight = journey.orderedFlights.firstOrNull {
-        (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > nowMillis
-    }
-    val countdownTarget = if (
-        firstDeparture != null &&
-        nowMillis < firstDeparture
-    ) {
-        firstDeparture
-    } else {
-        nextFlight?.estimatedDepartureTimeMillis ?: nextFlight?.departureTimeMillis
-    }
+    val wait = nextWait ?: com.roamatlas.data.flight.FlightScheduleTimes.nextDepartureWait(
+        flights = journey.orderedFlights,
+        airports = airports,
+        nowMillis = nowMillis
+    )
     val riskyConnection = journey.connections.firstOrNull {
         it.risk != ConnectionRisk.COMFORTABLE
     }
@@ -767,11 +764,16 @@ private fun UpcomingJourneyCard(
                 fontWeight = FontWeight.Bold
             )
             if (journey.flights.isNotEmpty()) {
-                JourneyRouteRiskStrip(journey)
+                JourneyRouteRiskStrip(journey, airportLookup = airports)
             }
-            countdownTarget?.let {
+            wait?.let {
                 Text(
-                    "Next departure in ${formatJourneyDuration((it - nowMillis) / 60_000)}",
+                    buildString {
+                        if (it.gpsConfirmsAtAirport) {
+                            append("At ${it.departureAirportCode} · ")
+                        }
+                        append("Next departure in ${formatJourneyDuration(it.minutesRemaining)}")
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )

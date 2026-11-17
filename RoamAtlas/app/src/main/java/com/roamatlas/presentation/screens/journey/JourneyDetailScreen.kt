@@ -197,7 +197,15 @@ fun JourneyDetailScreen(
                 }
             }
             journey?.let { value ->
-                item { JourneyHeader(value, state.nowMillis) }
+                item {
+                    JourneyHeader(
+                        journey = value,
+                        now = state.nowMillis,
+                        airports = state.airports,
+                        gpsLatitude = state.currentLatitude,
+                        gpsLongitude = state.currentLongitude
+                    )
+                }
                 state.suggestedArrivalPlace?.let { placeName ->
                     item {
                         SuggestedArrivalPlaceCard(
@@ -585,14 +593,19 @@ fun JourneyDetailScreen(
 @Composable
 private fun JourneyHeader(
     journey: JourneyWithFlights,
-    now: Long
+    now: Long,
+    airports: Map<String, com.roamatlas.data.airport.Airport> = emptyMap(),
+    gpsLatitude: Double? = null,
+    gpsLongitude: Double? = null
 ) {
-    val first = journey.firstDepartureMillis
+    val nextWait = FlightScheduleTimes.nextDepartureWait(
+        flights = journey.orderedFlights,
+        airports = airports,
+        nowMillis = now,
+        gpsLatitude = gpsLatitude,
+        gpsLongitude = gpsLongitude
+    )
     val final = journey.finalArrivalMillis
-    val nextFlight = journey.orderedFlights.firstOrNull {
-        !TransportMode.isHotel(it.transportMode) &&
-            (it.estimatedDepartureTimeMillis ?: it.departureTimeMillis) > now
-    }
     val start = LocalDate.ofEpochDay(journey.journey.startDateEpochDay)
     val end = LocalDate.ofEpochDay(
         journey.journey.endDateEpochDay ?: journey.journey.startDateEpochDay
@@ -611,13 +624,16 @@ private fun JourneyHeader(
                 "Booked legs done · still traveling to destination"
             }
         journey.orderedFlights.isEmpty() -> "Trip shell · add your first leg"
-        first != null && now < first ->
-            "Departs in ${formatDuration((first - now) / 60_000)}"
-        final != null && now <= final && nextFlight != null ->
-            "Next ${TransportMode.label(nextFlight.transportMode).lowercase()} in " +
-                formatDuration(
-                    ((nextFlight.estimatedDepartureTimeMillis ?: nextFlight.departureTimeMillis) - now) / 60_000
-                )
+        nextWait != null -> {
+            val mode = TransportMode.label(nextWait.flight.transportMode).lowercase()
+            buildString {
+                if (nextWait.gpsConfirmsAtAirport) {
+                    append("At ${nextWait.departureAirportCode} · ")
+                }
+                append("Next $mode in ${formatDuration(nextWait.minutesRemaining)}")
+            }
+        }
+        final != null && now <= final -> "Journey in progress"
         journey.isPast -> "Past journey"
         else -> "Journey in progress"
     }

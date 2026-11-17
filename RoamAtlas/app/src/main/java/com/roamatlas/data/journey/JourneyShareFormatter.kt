@@ -13,9 +13,6 @@ import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.local.entity.TransportMode
 import java.io.File
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 object JourneyShareFormatter {
     fun shareText(
@@ -100,7 +97,7 @@ object JourneyShareFormatter {
             FlightScheduleTimes.durationMinutes(flight, dep, airports[arrCode])
         }
         val transitMinutes = legs.zipWithNext().map { (a, b) ->
-            ((b.departureTimeMillis - a.arrivalTimeMillis) / 60_000L).coerceAtLeast(0)
+            FlightScheduleTimes.connectionMinutes(a, b, airports)
         }
         val totalFly = flyMinutes.sum()
         val totalTransit = transitMinutes.sum()
@@ -135,24 +132,50 @@ object JourneyShareFormatter {
                 appendLine(
                     "   ${flight.departureAirportCode} ${departure?.name ?: flight.departureAirportName.orEmpty()}"
                 )
-                appendLine("   ${formatTime(flight.departureTimeMillis)}")
+                val depInstant = FlightScheduleTimes.departureInstantMillis(
+                    flight,
+                    departure,
+                    arrival
+                )
+                val arrInstant = FlightScheduleTimes.arrivalInstantMillis(
+                    flight,
+                    departure,
+                    arrival
+                )
+                appendLine(
+                    "   ${
+                        FlightScheduleTimes.formatAirportLocal(
+                            depInstant,
+                            departure?.timeZoneId
+                        )
+                    }"
+                )
                 appendLine(
                     "   → $arrCode ${arrival?.name ?: flight.arrivalAirportName.orEmpty()}"
                 )
-                appendLine("   ${formatTime(flight.arrivalTimeMillis)}")
+                appendLine(
+                    "   ${
+                        FlightScheduleTimes.formatAirportLocal(
+                            arrInstant,
+                            arrival?.timeZoneId
+                        )
+                    }"
+                )
                 appendLine("   Fly time · ${formatMinutes(flyMinutes[index])}")
                 if (flight.estimatedDepartureTimeMillis != null ||
                     flight.estimatedArrivalTimeMillis != null
                 ) {
                     appendLine(
                         "   Latest estimate: ${
-                            formatTime(
-                                flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+                            FlightScheduleTimes.formatAirportLocal(
+                                depInstant,
+                                departure?.timeZoneId
                             )
                         }" +
                             " → ${
-                                formatTime(
-                                    flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+                                FlightScheduleTimes.formatAirportLocal(
+                                    arrInstant,
+                                    arrival?.timeZoneId
                                 )
                             }"
                     )
@@ -241,9 +264,6 @@ object JourneyShareFormatter {
         }
         return bitmap
     }
-
-    private fun formatTime(millis: Long): String =
-        SimpleDateFormat("EEE, d MMM yyyy HH:mm", Locale.getDefault()).format(Date(millis))
 
     private fun formatMinutes(total: Long): String {
         val safe = total.coerceAtLeast(0)

@@ -732,10 +732,10 @@ class JourneyRepository @Inject constructor(
     ): Int = 0
 
     /**
-     * Undo damage from older builds that rewrote ticket millis (e.g. SQ963
-     * CGK→SIN pushed from 17 Nov 20:55 to 18 Nov and showed ~17h).
-     * Restores the known Brazil Crew-X Share times when that pattern is detected.
-     * Safe to call on every open — only writes when corruption is detected.
+     * Restore Brazil Crew-X ticket times in **each airport's timezone**
+     * (not the phone zone). Fixes overnight corruption and the +1h wait bug
+     * after the phone flips Jakarta → Singapore.
+     * Safe to call repeatedly — only writes when stored millis differ.
      */
     suspend fun repairCorruptedTicketSchedules(journeyId: Long): Int {
         val flights = flightDao.getFlightsForJourneySnapshot(journeyId)
@@ -756,39 +756,48 @@ class JourneyRepository @Inject constructor(
                 third.arrivalAirportCode.equals("GIG", true)
         if (!isBrazilCrewRoute) return 0
 
-        val zone = ZoneId.systemDefault()
-        val firstDurationHours =
-            ((first.arrivalTimeMillis - first.departureTimeMillis) / 3_600_000.0)
-        val firstArrDay = Instant.ofEpochMilli(first.arrivalTimeMillis).atZone(zone).toLocalDate()
-        val firstDepDay = Instant.ofEpochMilli(first.departureTimeMillis).atZone(zone).toLocalDate()
-        val corrupted = firstDurationHours > 4.0 || firstArrDay.isAfter(firstDepDay)
-        if (!corrupted) return 0
-
-        // Exact ticket times from the user's Share (wall clock in device zone,
-        // same convention Share / itinerary use for display).
+        // ATPI itinerary ZFA2FG (MR HARDIAN SUPRAPTO) — airport-local wall clocks.
+        // SQ963 CGK 18:10 → SIN 20:55 (01:45)
+        // AF257 SIN 22:50 → CDG 06:05+1 (14:15)
+        // AF484 CDG 10:55 → GIG 18:30 (11:35)
         val restored = listOf(
-            first to (
-                wallClockMillis(2026, 11, 17, 18, 10, zone) to
-                    wallClockMillis(2026, 11, 17, 20, 55, zone)
+            Triple(
+                first,
+                FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 17, 18, 10, "Asia/Jakarta"
+                ) to FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 17, 20, 55, "Asia/Singapore"
                 ),
-            second to (
-                wallClockMillis(2026, 11, 17, 22, 50, zone) to
-                    wallClockMillis(2026, 11, 18, 6, 5, zone)
+                105 // 01:45
+            ),
+            Triple(
+                second,
+                FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 17, 22, 50, "Asia/Singapore"
+                ) to FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 18, 6, 5, "Europe/Paris"
                 ),
-            third to (
-                wallClockMillis(2026, 11, 18, 10, 55, zone) to
-                    wallClockMillis(2026, 11, 18, 18, 30, zone)
-                )
+                855 // 14:15
+            ),
+            Triple(
+                third,
+                FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 18, 10, 55, "Europe/Paris"
+                ) to FlightScheduleTimes.wallClockMillis(
+                    2026, 11, 18, 18, 30, "America/Sao_Paulo"
+                ),
+                695 // 11:35
+            )
         )
         val now = System.currentTimeMillis()
         var updated = 0
-        restored.forEach { (flight, times) ->
+        restored.forEach { (flight, times, ticketMinutes) ->
             val (dep, arr) = times
-            val duration = ((arr - dep) / 60_000L).toInt().coerceAtLeast(0)
             if (flight.departureTimeMillis == dep &&
                 flight.arrivalTimeMillis == arr &&
                 flight.estimatedDepartureTimeMillis == null &&
-                flight.estimatedArrivalTimeMillis == null
+                flight.estimatedArrivalTimeMillis == null &&
+                flight.durationMinutes == ticketMinutes
             ) {
                 return@forEach
             }
@@ -796,7 +805,13 @@ class JourneyRepository @Inject constructor(
                 flight.copy(
                     departureTimeMillis = dep,
                     arrivalTimeMillis = arr,
-                    durationMinutes = duration,
+                    durationMinutes = ticketMinutes,
+                    distanceKm = flight.distanceKm ?: when (flight.departureAirportCode.uppercase()) {
+                        "CGK" -> 556.0 * 1.60934 // ATPI miles → km
+                        "SIN" -> 6653.0 * 1.60934
+                        "CDG" -> 5700.0 * 1.60934
+                        else -> flight.distanceKm
+                    },
                     estimatedDepartureTimeMillis = null,
                     estimatedArrivalTimeMillis = null,
                     updatedAtMillis = now
@@ -821,18 +836,15 @@ class JourneyRepository @Inject constructor(
         return updated
     }
 
-    private fun wallClockMillis(
-        year: Int,
-        month: Int,
-        day: Int,
-        hour: Int,
-        minute: Int,
-        zone: ZoneId
-    ): Long =
-        LocalDateTime.of(year, month, day, hour, minute)
-            .atZone(zone)
-            .toInstant()
-            .toEpochMilli()
+    /** Repair known ticket TZ issues across journeys (dashboard / monitor). */
+    suspend fun repairAllTicketSchedules(): Int {
+        val journeys = tripDao.getAllSnapshot()
+        var total = 0
+        journeys.forEach { trip ->
+            total += repairCorruptedTicketSchedules(trip.id)
+        }
+        return total
+    }
 
     /** Keep the journey date shell open through today while still traveling. */
     suspend fun ensureOpenThroughToday(journeyId: Long) {

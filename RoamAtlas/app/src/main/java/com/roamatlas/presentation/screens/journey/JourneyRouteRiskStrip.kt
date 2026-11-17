@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyWithFlights
 
@@ -26,12 +28,15 @@ import com.roamatlas.data.journey.JourneyWithFlights
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun JourneyRouteRiskStrip(journey: JourneyWithFlights) {
+fun JourneyRouteRiskStrip(
+    journey: JourneyWithFlights,
+    airportLookup: Map<String, Airport> = emptyMap()
+) {
     if (journey.orderedFlights.isEmpty()) return
     val connectionByAirport = journey.connections.associateBy {
         it.departingFlight.departureAirportCode.uppercase()
     }
-    val airports = buildList {
+    val routeCodes = buildList {
         add(journey.orderedFlights.first().departureAirportCode.uppercase())
         journey.orderedFlights.forEach { add(it.arrivalAirportCode.uppercase()) }
     }
@@ -41,7 +46,7 @@ fun JourneyRouteRiskStrip(journey: JourneyWithFlights) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            airports.forEachIndexed { index, airport ->
+            routeCodes.forEachIndexed { index, airport ->
                 if (index > 0) {
                     Text(
                         "→",
@@ -60,7 +65,16 @@ fun JourneyRouteRiskStrip(journey: JourneyWithFlights) {
             Text(
                 risky.joinToString(" · ") { connection ->
                     val airport = connection.departingFlight.departureAirportCode.uppercase()
-                    val duration = formatDuration(connection.effectiveMinutes)
+                    val minutes = if (airportLookup.isNotEmpty()) {
+                        FlightScheduleTimes.connectionMinutes(
+                            connection.arrivingFlight,
+                            connection.departingFlight,
+                            airportLookup
+                        )
+                    } else {
+                        connection.effectiveMinutes
+                    }
+                    val duration = formatDuration(minutes)
                     when (connection.risk) {
                         ConnectionRisk.TIGHT ->
                             "$airport transit $duration · tight"

@@ -2,11 +2,15 @@ package com.roamatlas.data.flight
 
 import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TransportMode
+import com.roamatlas.data.local.entity.TravelLegStatus
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -16,6 +20,9 @@ import kotlin.math.abs
  * zone (so Share text shows the ticket times). Duration must still compare real
  * instants: read the printed local time back out, then apply each airport's TZ.
  *
+ * Waiting / countdown must use the **departure airport timezone** (SIN now,
+ * CDG later), not the phone zone. GPS only confirms you are at that airport.
+ *
  * Never rewrite stored millis from display code — that made times flip.
  */
 object FlightScheduleTimes {
@@ -24,6 +31,14 @@ object FlightScheduleTimes {
         val departureMillis: Long,
         val arrivalMillis: Long,
         val durationMinutes: Long
+    )
+
+    data class NextDepartureWait(
+        val flight: FlightEntity,
+        val departureInstantMillis: Long,
+        val minutesRemaining: Long,
+        val departureAirportCode: String,
+        val gpsConfirmsAtAirport: Boolean
     )
 
     /**
@@ -110,16 +125,65 @@ object FlightScheduleTimes {
         }
 
         val expected = expectedMinutes(distanceKm)
-        val candidates = linkedSetOf(
+        // Identity: millis already true UTC (ATPI airport-TZ stamps).
+        // Also try common "typed in one zone" sources. Do not collapse by
+        // duration alone — UTC reinterpret of Jakarta-typed times can keep
+        // ~14h fly time while shifting SIN 22:50 → 15:50.
+        val sourceZones = linkedSetOf(
             ZoneId.systemDefault(),
             ZoneOffset.UTC,
             depZone,
-            arrZone
-        ).map { sourceZone ->
-            reinterpret(departureMillis, arrivalMillis, sourceZone, depZone, arrZone)
-        }.distinctBy { it.durationMinutes }
-
+            arrZone,
+            ZoneId.of("Asia/Jakarta"),
+            ZoneId.of("Asia/Singapore"),
+            ZoneId.of("Europe/Paris")
+        )
+        val candidates = buildList {
+            add(identityCandidate(departureMillis, arrivalMillis, rawMinutes, depZone))
+            sourceZones.forEach { sourceZone ->
+                add(
+                    scored(
+                        reinterpret(departureMillis, arrivalMillis, sourceZone, depZone, arrZone),
+                        sourceZone,
+                        depZone
+                    )
+                )
+            }
+        }
         return selectBest(candidates, rawMinutes, expected)
+    }
+
+    private data class ScoredSchedule(
+        val schedule: NormalizedSchedule,
+        val sourceOffsetHours: Int,
+        val depOffsetHours: Int
+    )
+
+    private fun identityCandidate(
+        departureMillis: Long,
+        arrivalMillis: Long,
+        rawMinutes: Long,
+        depZone: ZoneId
+    ): ScoredSchedule {
+        val depOffset = depZone.rules.getOffset(Instant.ofEpochMilli(departureMillis)).totalSeconds / 3600
+        return ScoredSchedule(
+            schedule = NormalizedSchedule(departureMillis, arrivalMillis, rawMinutes),
+            sourceOffsetHours = depOffset,
+            depOffsetHours = depOffset
+        )
+    }
+
+    private fun scored(
+        schedule: NormalizedSchedule,
+        sourceZone: ZoneId,
+        depZone: ZoneId
+    ): ScoredSchedule {
+        val at = Instant.ofEpochMilli(schedule.departureMillis)
+        return ScoredSchedule(
+            schedule = schedule,
+            sourceOffsetHours = sourceZone.rules.getOffset(at).totalSeconds / 3600,
+            depOffsetHours = depZone.rules.getOffset(at).totalSeconds / 3600
+        )
     }
 
     /**
@@ -136,6 +200,21 @@ object FlightScheduleTimes {
         return date.atTime(hour, minute).atZone(zone).toInstant().toEpochMilli()
     }
 
+    fun wallClockMillis(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        airportTimeZoneId: String
+    ): Long {
+        val zone = parseZone(airportTimeZoneId) ?: ZoneId.systemDefault()
+        return LocalDateTime.of(year, month, day, hour, minute)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+    }
+
     fun reinterpretMillisAsAirportLocal(
         millis: Long,
         sourceZone: ZoneId = ZoneId.systemDefault(),
@@ -144,6 +223,159 @@ object FlightScheduleTimes {
         val airportZone = parseZone(airportTimeZoneId) ?: return millis
         val local = Instant.ofEpochMilli(millis).atZone(sourceZone).toLocalDateTime()
         return local.atZone(airportZone).toInstant().toEpochMilli()
+    }
+
+    /** True departure instant for a leg (airport TZ), including estimates when set. */
+    fun departureInstantMillis(
+        flight: FlightEntity,
+        departureAirport: Airport?,
+        arrivalAirport: Airport?
+    ): Long {
+        val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+        val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+        val distance = flight.distanceKm ?: haversineKm(
+            departureAirport?.latitude,
+            departureAirport?.longitude,
+            arrivalAirport?.latitude,
+            arrivalAirport?.longitude
+        )
+        return normalize(
+            departureMillis = dep,
+            arrivalMillis = arr,
+            departureTimeZoneId = departureAirport?.timeZoneId,
+            arrivalTimeZoneId = arrivalAirport?.timeZoneId,
+            distanceKm = distance
+        ).departureMillis
+    }
+
+    /** True arrival instant for a leg (airport TZ), including estimates when set. */
+    fun arrivalInstantMillis(
+        flight: FlightEntity,
+        departureAirport: Airport?,
+        arrivalAirport: Airport?
+    ): Long {
+        val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+        val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+        val distance = flight.distanceKm ?: haversineKm(
+            departureAirport?.latitude,
+            departureAirport?.longitude,
+            arrivalAirport?.latitude,
+            arrivalAirport?.longitude
+        )
+        return normalize(
+            departureMillis = dep,
+            arrivalMillis = arr,
+            departureTimeZoneId = departureAirport?.timeZoneId,
+            arrivalTimeZoneId = arrivalAirport?.timeZoneId,
+            distanceKm = distance
+        ).arrivalMillis
+    }
+
+    /**
+     * Next open leg waiting time. Departure airport TZ owns the clock;
+     * optional GPS only confirms you are at that airport (SIN now, CDG later).
+     */
+    fun nextDepartureWait(
+        flights: List<FlightEntity>,
+        airports: Map<String, Airport>,
+        nowMillis: Long,
+        gpsLatitude: Double? = null,
+        gpsLongitude: Double? = null,
+        nearAirportRadiusKm: Double = 80.0
+    ): NextDepartureWait? {
+        val next = flights
+            .asSequence()
+            .filterNot { TransportMode.isHotel(it.transportMode) }
+            .filterNot {
+                val status = TravelLegStatus.normalize(it.travelLegStatus)
+                status == TravelLegStatus.ARRIVED ||
+                    status == TravelLegStatus.SKIPPED ||
+                    status == TravelLegStatus.MISSED
+            }
+            .map { flight ->
+                val depAirport = airports[flight.departureAirportCode.uppercase(Locale.US)]
+                    ?: airports[flight.departureAirportCode]
+                val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+                val arrAirport = airports[arrCode.uppercase(Locale.US)] ?: airports[arrCode]
+                flight to departureInstantMillis(flight, depAirport, arrAirport)
+            }
+            .firstOrNull { (_, depInstant) -> depInstant > nowMillis }
+            ?: return null
+
+        val (flight, depInstant) = next
+        val code = flight.departureAirportCode.uppercase(Locale.US)
+        val depAirport = airports[code] ?: airports[flight.departureAirportCode]
+        val near = if (
+            gpsLatitude != null &&
+            gpsLongitude != null &&
+            depAirport != null
+        ) {
+            isNearAirport(
+                gpsLatitude,
+                gpsLongitude,
+                depAirport,
+                nearAirportRadiusKm
+            )
+        } else {
+            false
+        }
+        return NextDepartureWait(
+            flight = flight,
+            departureInstantMillis = depInstant,
+            minutesRemaining = ((depInstant - nowMillis) / 60_000L).coerceAtLeast(0),
+            departureAirportCode = code,
+            gpsConfirmsAtAirport = near
+        )
+    }
+
+    fun connectionMinutes(
+        arriving: FlightEntity,
+        departing: FlightEntity,
+        airports: Map<String, Airport>
+    ): Long {
+        val arrCode = arriving.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+            ?: arriving.arrivalAirportCode
+        val arriveAt = arrivalInstantMillis(
+            arriving,
+            airports[arriving.departureAirportCode.uppercase(Locale.US)]
+                ?: airports[arriving.departureAirportCode],
+            airports[arrCode.uppercase(Locale.US)] ?: airports[arrCode]
+        )
+        val leaveAt = departureInstantMillis(
+            departing,
+            airports[departing.departureAirportCode.uppercase(Locale.US)]
+                ?: airports[departing.departureAirportCode],
+            airports[departing.arrivalAirportCode.uppercase(Locale.US)]
+                ?: airports[departing.arrivalAirportCode]
+        )
+        return ((leaveAt - arriveAt) / 60_000L).coerceAtLeast(0)
+    }
+
+    fun isNearAirport(
+        latitude: Double,
+        longitude: Double,
+        airport: Airport,
+        radiusKm: Double = 80.0
+    ): Boolean {
+        val distance = haversineKm(
+            latitude,
+            longitude,
+            airport.latitude,
+            airport.longitude
+        ) ?: return false
+        return distance <= radiusKm
+    }
+
+    fun formatAirportLocal(
+        millis: Long,
+        airportTimeZoneId: String?,
+        pattern: String = "EEE, d MMM yyyy HH:mm"
+    ): String {
+        val zone = parseZone(airportTimeZoneId) ?: ZoneId.systemDefault()
+        return Instant.ofEpochMilli(millis)
+            .atZone(zone)
+            .format(DateTimeFormatter.ofPattern(pattern, Locale.getDefault()))
     }
 
     private fun reinterpret(
@@ -172,25 +404,43 @@ object FlightScheduleTimes {
     }
 
     private fun selectBest(
-        candidates: List<NormalizedSchedule>,
+        candidates: List<ScoredSchedule>,
         rawMinutes: Long,
         expectedMinutes: Long?
     ): NormalizedSchedule {
         if (candidates.isEmpty()) {
             return NormalizedSchedule(0, 0, rawMinutes)
         }
+        val plausible = candidates.filter { it.schedule.durationMinutes in 20..(22 * 60) }
+            .ifEmpty { candidates }
         if (expectedMinutes != null) {
-            return candidates.minBy { abs(it.durationMinutes - expectedMinutes) }
+            return plausible.minWith(
+                compareBy<ScoredSchedule> {
+                    abs(it.schedule.durationMinutes - expectedMinutes)
+                }.thenBy {
+                    // Prefer "typed in a nearby zone" (e.g. Jakarta +7 while
+                    // departing SIN +8) over re-reading through the departure
+                    // zone itself, which shifts 22:50 → 23:50 after the phone
+                    // moves to Singapore.
+                    val delta = abs(it.sourceOffsetHours - it.depOffsetHours)
+                    when (delta) {
+                        1, 2 -> 0
+                        0 -> 1
+                        else -> 2 + delta
+                    }
+                }.thenBy {
+                    it.schedule.departureMillis
+                }
+            ).schedule
         }
-        val plausible = candidates.filter { it.durationMinutes in 20..(22 * 60) }
-        if (plausible.isEmpty()) return candidates.first()
-        val raw = plausible.firstOrNull { it.durationMinutes == rawMinutes }
-        if (raw != null && plausible.size == 1) return raw
-        val shortest = plausible.minOf { it.durationMinutes }
-        return if (rawMinutes == shortest && plausible.any { it.durationMinutes > rawMinutes + 90 }) {
-            plausible.maxBy { it.durationMinutes }
+        val schedules = plausible.map { it.schedule }
+        val raw = schedules.firstOrNull { it.durationMinutes == rawMinutes }
+        if (raw != null && schedules.size == 1) return raw
+        val shortest = schedules.minOf { it.durationMinutes }
+        return if (rawMinutes == shortest && schedules.any { it.durationMinutes > rawMinutes + 90 }) {
+            schedules.maxBy { it.durationMinutes }
         } else {
-            plausible.firstOrNull { it.durationMinutes == rawMinutes } ?: plausible.first()
+            schedules.firstOrNull { it.durationMinutes == rawMinutes } ?: schedules.first()
         }
     }
 
