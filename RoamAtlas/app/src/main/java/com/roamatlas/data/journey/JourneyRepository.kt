@@ -72,10 +72,12 @@ data class JourneyWithFlights(
     val journey: TripEntity,
     val flights: List<FlightEntity>
 ) {
+    /** Always time-ordered so 1st / 2nd / 3rd match departure, even if added out of order. */
     val orderedFlights: List<FlightEntity>
         get() = flights.sortedWith(
-            compareBy<FlightEntity> { it.journeySequence ?: Int.MAX_VALUE }
-                .thenBy { it.departureTimeMillis }
+            compareBy<FlightEntity> { it.departureTimeMillis }
+                .thenBy { it.journeySequence ?: Int.MAX_VALUE }
+                .thenBy { it.id }
         )
 
     val firstDepartureMillis: Long?
@@ -849,21 +851,116 @@ class JourneyRepository @Inject constructor(
     suspend fun attachFlightToJourney(journeyId: Long, flightId: Long): Boolean {
         val journey = tripDao.getById(journeyId) ?: return false
         val flight = flightDao.getFlightById(flightId) ?: return false
-        val existing = flightDao.getFlightsForJourney(journeyId).first()
-        val nextSequence = (existing.maxOfOrNull { it.journeySequence ?: -1 } ?: -1) + 1
         val now = System.currentTimeMillis()
         flightDao.update(
             flight.copy(
                 journeyId = journeyId,
-                journeySequence = nextSequence,
+                journeySequence = Int.MAX_VALUE, // resequenceJourneyByDeparture assigns real order
                 updatedAtMillis = now
             )
         )
-        // Expand trip dates if the new leg falls outside the shell.
+        resequenceJourneyByDeparture(journeyId)
+        expandJourneyDatesForFlight(journeyId, flight.departureTimeMillis, flight.arrivalTimeMillis)
+        return true
+    }
+
+    /**
+     * Update ticket schedule fields (airports, times, airline, flight number).
+     * Times are ticket wall-clock values in the device zone (same as Share display).
+     * Resorts the journey by departure time afterward.
+     */
+    suspend fun updateFlightSchedule(
+        flightId: Long,
+        departureAirportCode: String,
+        arrivalAirportCode: String,
+        departureAirportName: String?,
+        arrivalAirportName: String?,
+        departureCity: String?,
+        arrivalCity: String?,
+        departureCountryCode: String?,
+        arrivalCountryCode: String?,
+        departureTimeMillis: Long,
+        arrivalTimeMillis: Long,
+        airline: String?,
+        flightNumber: String?,
+        durationMinutes: Int?,
+        distanceKm: Double?
+    ): Boolean {
+        val flight = flightDao.getFlightById(flightId) ?: return false
+        val depCode = departureAirportCode.trim().uppercase()
+        val arrCode = arrivalAirportCode.trim().uppercase()
+        if (depCode.length < 3 || arrCode.length < 3) return false
+        if (arrivalTimeMillis < departureTimeMillis) return false
+        val now = System.currentTimeMillis()
+        flightDao.update(
+            flight.copy(
+                departureAirportCode = depCode,
+                arrivalAirportCode = arrCode,
+                departureAirportName = departureAirportName?.takeIf { it.isNotBlank() },
+                arrivalAirportName = arrivalAirportName?.takeIf { it.isNotBlank() },
+                departureCity = departureCity?.takeIf { it.isNotBlank() },
+                arrivalCity = arrivalCity?.takeIf { it.isNotBlank() },
+                departureCountryCode = departureCountryCode?.takeIf { it.isNotBlank() },
+                arrivalCountryCode = arrivalCountryCode?.takeIf { it.isNotBlank() },
+                departureTimeMillis = departureTimeMillis,
+                arrivalTimeMillis = arrivalTimeMillis,
+                airline = airline?.takeIf { it.isNotBlank() },
+                flightNumber = flightNumber?.takeIf { it.isNotBlank() }?.uppercase(),
+                durationMinutes = durationMinutes,
+                distanceKm = distanceKm ?: flight.distanceKm,
+                // Clear stale estimates after a ticket-time edit.
+                estimatedDepartureTimeMillis = null,
+                estimatedArrivalTimeMillis = null,
+                updatedAtMillis = now
+            )
+        )
+        flight.journeyId?.let { journeyId ->
+            resequenceJourneyByDeparture(journeyId)
+            expandJourneyDatesForFlight(journeyId, departureTimeMillis, arrivalTimeMillis)
+        }
+        return true
+    }
+
+    /** Remove a leg from the journey and delete it. Remaining legs are re-sorted by time. */
+    suspend fun removeFlightFromJourney(journeyId: Long, flightId: Long): Boolean {
+        val flight = flightDao.getFlightById(flightId) ?: return false
+        if (flight.journeyId != journeyId) return false
+        flight.photoUri?.let { deleteLocalFileUri(it) }
+        flightDao.delete(flight)
+        resequenceJourneyByDeparture(journeyId)
+        return true
+    }
+
+    /** Assign journeySequence 0..n by departure time so numbering matches the itinerary. */
+    suspend fun resequenceJourneyByDeparture(journeyId: Long) {
+        val now = System.currentTimeMillis()
+        val ordered = flightDao.getFlightsForJourneySnapshot(journeyId)
+            .sortedWith(
+                compareBy<FlightEntity> { it.departureTimeMillis }
+                    .thenBy { it.id }
+            )
+        ordered.forEachIndexed { index, flight ->
+            if (flight.journeySequence != index) {
+                flightDao.update(
+                    flight.copy(
+                        journeySequence = index,
+                        updatedAtMillis = now
+                    )
+                )
+            }
+        }
+    }
+
+    private suspend fun expandJourneyDatesForFlight(
+        journeyId: Long,
+        departureTimeMillis: Long,
+        arrivalTimeMillis: Long
+    ) {
+        val journey = tripDao.getById(journeyId) ?: return
         val zone = ZoneId.systemDefault()
-        val depDay = Instant.ofEpochMilli(flight.departureTimeMillis)
+        val depDay = Instant.ofEpochMilli(departureTimeMillis)
             .atZone(zone).toLocalDate().toEpochDay()
-        val arrDay = Instant.ofEpochMilli(flight.arrivalTimeMillis)
+        val arrDay = Instant.ofEpochMilli(arrivalTimeMillis)
             .atZone(zone).toLocalDate().toEpochDay()
         val start = minOf(journey.startDateEpochDay, depDay)
         val end = maxOf(journey.endDateEpochDay ?: journey.startDateEpochDay, arrDay)
@@ -872,11 +969,10 @@ class JourneyRepository @Inject constructor(
                 journey.copy(
                     startDateEpochDay = start,
                     endDateEpochDay = end,
-                    updatedAtMillis = now
+                    updatedAtMillis = System.currentTimeMillis()
                 )
             )
         }
-        return true
     }
 
     suspend fun addJourneyPhoto(journeyId: Long, uri: Uri): Boolean {

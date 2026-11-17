@@ -103,6 +103,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -127,6 +128,8 @@ fun JourneyDetailScreen(
     var showAddMenu by remember { mutableStateOf(false) }
     var showGroundLegDialog by remember { mutableStateOf(false) }
     var editingFlight by remember { mutableStateOf<FlightEntity?>(null) }
+    var opsEditingFlight by remember { mutableStateOf<FlightEntity?>(null) }
+    var removingFlight by remember { mutableStateOf<FlightEntity?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
     var previewPdfUri by remember { mutableStateOf<String?>(null) }
@@ -250,7 +253,8 @@ fun JourneyDetailScreen(
                     SimpleJourneyItinerary(
                         journey = value,
                         airports = state.airports,
-                        onEditLeg = { editingFlight = it }
+                        onEditLeg = { editingFlight = it },
+                        onRemoveLeg = { removingFlight = it }
                     )
                 }
                 items(
@@ -260,6 +264,8 @@ fun JourneyDetailScreen(
                     FlightLegActionsCard(
                         flight = flight,
                         onEdit = { editingFlight = flight },
+                        onEditOps = { opsEditingFlight = flight },
+                        onRemove = { removingFlight = flight },
                         onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
                         onMarkMissed = { viewModel.markLegMissed(flight.id) },
                         onMarkDiverted = { code -> viewModel.markLegDiverted(flight.id, code) },
@@ -437,9 +443,31 @@ fun JourneyDetailScreen(
         )
     }
     editingFlight?.let { flight ->
-        EditFlightStatusDialog(
+        EditFlightScheduleDialog(
             flight = flight,
             onDismiss = { editingFlight = null },
+            onSave = { depCode, arrCode, depDate, depHour, depMinute, arrDate, arrHour, arrMinute, airline, number ->
+                viewModel.updateFlightSchedule(
+                    flight = flight,
+                    departureAirportCode = depCode,
+                    arrivalAirportCode = arrCode,
+                    departureDate = depDate,
+                    departureHour = depHour,
+                    departureMinute = depMinute,
+                    arrivalDate = arrDate,
+                    arrivalHour = arrHour,
+                    arrivalMinute = arrMinute,
+                    airline = airline,
+                    flightNumber = number
+                )
+                editingFlight = null
+            }
+        )
+    }
+    opsEditingFlight?.let { flight ->
+        EditFlightStatusDialog(
+            flight = flight,
+            onDismiss = { opsEditingFlight = null },
             onSave = {
                     departureDelay,
                     arrivalDelay,
@@ -462,7 +490,30 @@ fun JourneyDetailScreen(
                     terminal,
                     gate
                 )
-                editingFlight = null
+                opsEditingFlight = null
+            }
+        )
+    }
+    removingFlight?.let { flight ->
+        AlertDialog(
+            onDismissRequest = { removingFlight = null },
+            title = { Text("Remove flight?") },
+            text = {
+                Text(
+                    "Remove ${listOfNotNull(flight.airline, flight.flightNumber).joinToString(" ").ifBlank { flight.departureAirportCode + " → " + flight.arrivalAirportCode }} " +
+                        "from this journey? You can add it again anytime — legs sort by departure time."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.removeFlightFromJourney(flight.id)
+                        removingFlight = null
+                    }
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { removingFlight = null }) { Text("Cancel") }
             }
         )
     }
@@ -1011,7 +1062,8 @@ private fun JourneyRouteMap(
 private fun SimpleJourneyItinerary(
     journey: JourneyWithFlights,
     airports: Map<String, Airport>,
-    onEditLeg: (FlightEntity) -> Unit
+    onEditLeg: (FlightEntity) -> Unit,
+    onRemoveLeg: (FlightEntity) -> Unit
 ) {
     val legs = journey.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
     if (legs.isEmpty()) return
@@ -1079,7 +1131,10 @@ private fun SimpleJourneyItinerary(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
-                    TextButton(onClick = { onEditLeg(flight) }) { Text("Update times") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { onEditLeg(flight) }) { Text("Edit") }
+                        TextButton(onClick = { onRemoveLeg(flight) }) { Text("Remove") }
+                    }
                 }
 
                 if (index < legs.lastIndex) {
@@ -1126,6 +1181,8 @@ private fun SimpleJourneyItinerary(
 private fun FlightLegActionsCard(
     flight: FlightEntity,
     onEdit: () -> Unit,
+    onEditOps: () -> Unit,
+    onRemove: () -> Unit,
     onMarkDelayed: () -> Unit,
     onMarkMissed: () -> Unit,
     onMarkDiverted: (String) -> Unit,
@@ -1175,13 +1232,17 @@ private fun FlightLegActionsCard(
                     "${flight.departureAirportCode} → ${flight.arrivalAirportCode}",
                     fontWeight = FontWeight.SemiBold
                 )
-                TextButton(onClick = onEdit) { Text("Update") }
+                Row {
+                    TextButton(onClick = onEdit) { Text("Edit") }
+                    TextButton(onClick = onRemove) { Text("Remove") }
+                }
             }
             AssistChip(
                 onClick = {},
                 enabled = false,
                 label = { Text(TravelLegStatus.label(flight.travelLegStatus)) }
             )
+            TextButton(onClick = onEditOps) { Text("Delays, seat & status") }
             TravelLegActionsRow(
                 onMarkDelayed = onMarkDelayed,
                 onMarkMissed = onMarkMissed,
@@ -1895,6 +1956,193 @@ private fun JourneyDetailDatePicker(
         }
     ) {
         DatePicker(state = pickerState)
+    }
+}
+
+@Composable
+private fun EditFlightScheduleDialog(
+    flight: FlightEntity,
+    onDismiss: () -> Unit,
+    onSave: (
+        departureAirportCode: String,
+        arrivalAirportCode: String,
+        departureDate: LocalDate,
+        departureHour: Int,
+        departureMinute: Int,
+        arrivalDate: LocalDate,
+        arrivalHour: Int,
+        arrivalMinute: Int,
+        airline: String,
+        flightNumber: String
+    ) -> Unit
+) {
+    val zone = ZoneId.systemDefault()
+    val depZdt = remember(flight.id, flight.departureTimeMillis) {
+        Instant.ofEpochMilli(flight.departureTimeMillis).atZone(zone)
+    }
+    val arrZdt = remember(flight.id, flight.arrivalTimeMillis) {
+        Instant.ofEpochMilli(flight.arrivalTimeMillis).atZone(zone)
+    }
+    var airline by remember(flight.id) { mutableStateOf(flight.airline.orEmpty()) }
+    var flightNumber by remember(flight.id) { mutableStateOf(flight.flightNumber.orEmpty()) }
+    var depCode by remember(flight.id) { mutableStateOf(flight.departureAirportCode) }
+    var arrCode by remember(flight.id) { mutableStateOf(flight.arrivalAirportCode) }
+    var depDate by remember(flight.id) { mutableStateOf(depZdt.toLocalDate()) }
+    var arrDate by remember(flight.id) { mutableStateOf(arrZdt.toLocalDate()) }
+    var depHour by remember(flight.id) { mutableStateOf(depZdt.hour.toString()) }
+    var depMinute by remember(flight.id) {
+        mutableStateOf(depZdt.minute.toString().padStart(2, '0'))
+    }
+    var arrHour by remember(flight.id) { mutableStateOf(arrZdt.hour.toString()) }
+    var arrMinute by remember(flight.id) {
+        mutableStateOf(arrZdt.minute.toString().padStart(2, '0'))
+    }
+    var pickingDepDate by remember { mutableStateOf(false) }
+    var pickingArrDate by remember { mutableStateOf(false) }
+    val dateFmt = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
+    val depH = depHour.toIntOrNull()
+    val depM = depMinute.toIntOrNull()
+    val arrH = arrHour.toIntOrNull()
+    val arrM = arrMinute.toIntOrNull()
+    val canSave = depCode.trim().length >= 3 &&
+        arrCode.trim().length >= 3 &&
+        depH != null && depH in 0..23 &&
+        depM != null && depM in 0..59 &&
+        arrH != null && arrH in 0..23 &&
+        arrM != null && arrM in 0..59
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit flight") },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Fix ticket times, airports, or flight code. Legs re-sort by departure time after save.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = airline,
+                        onValueChange = { airline = it },
+                        label = { Text("Airline") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = flightNumber,
+                        onValueChange = { flightNumber = it.uppercase().take(10) },
+                        label = { Text("Flight #") },
+                        modifier = Modifier.weight(0.7f),
+                        singleLine = true
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = depCode,
+                        onValueChange = { depCode = it.uppercase().take(4) },
+                        label = { Text("From") },
+                        placeholder = { Text("CGK") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = arrCode,
+                        onValueChange = { arrCode = it.uppercase().take(4) },
+                        label = { Text("To") },
+                        placeholder = { Text("SIN") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                Text("Departure", fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { pickingDepDate = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Date · ${depDate.format(dateFmt)}")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = depHour,
+                        onValueChange = { depHour = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Hour (0–23)") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = depMinute,
+                        onValueChange = { depMinute = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Minute") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                Text("Arrival", fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { pickingArrDate = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Date · ${arrDate.format(dateFmt)}")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = arrHour,
+                        onValueChange = { arrHour = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Hour (0–23)") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = arrMinute,
+                        onValueChange = { arrMinute = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Minute") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (!canSave) return@Button
+                    onSave(
+                        depCode.trim(),
+                        arrCode.trim(),
+                        depDate,
+                        depH!!,
+                        depM!!,
+                        arrDate,
+                        arrH!!,
+                        arrM!!,
+                        airline.trim(),
+                        flightNumber.trim()
+                    )
+                },
+                enabled = canSave
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+    if (pickingDepDate) {
+        JourneyDetailDatePicker(
+            initialDate = depDate,
+            onDismiss = { pickingDepDate = false },
+            onConfirm = {
+                depDate = it
+                if (arrDate.isBefore(it)) arrDate = it
+                pickingDepDate = false
+            }
+        )
+    }
+    if (pickingArrDate) {
+        JourneyDetailDatePicker(
+            initialDate = arrDate,
+            onDismiss = { pickingArrDate = false },
+            onConfirm = {
+                arrDate = it
+                pickingArrDate = false
+            }
+        )
     }
 }
 

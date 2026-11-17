@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.airport.AirportRepository
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.journey.JourneyTravelDetector
 import com.roamatlas.data.journey.JourneyWithFlights
@@ -237,6 +238,80 @@ class JourneyDetailViewModel @Inject constructor(
                 seatNumber = seatNumber,
                 terminal = terminal,
                 gate = gate
+            )
+        }
+    }
+
+    fun updateFlightSchedule(
+        flight: FlightEntity,
+        departureAirportCode: String,
+        arrivalAirportCode: String,
+        departureDate: LocalDate,
+        departureHour: Int,
+        departureMinute: Int,
+        arrivalDate: LocalDate,
+        arrivalHour: Int,
+        arrivalMinute: Int,
+        airline: String,
+        flightNumber: String
+    ) {
+        viewModelScope.launch {
+            val zone = ZoneId.systemDefault()
+            val departureMillis = departureDate.atTime(departureHour, departureMinute)
+                .atZone(zone).toInstant().toEpochMilli()
+            val arrivalMillis = arrivalDate.atTime(arrivalHour, arrivalMinute)
+                .atZone(zone).toInstant().toEpochMilli()
+            if (arrivalMillis < departureMillis) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "Arrival must be after departure."
+                )
+                return@launch
+            }
+            val depAirport = airportRepository.findByCode(departureAirportCode)
+            val arrAirport = airportRepository.findByCode(arrivalAirportCode)
+            val distance = FlightScheduleTimes.haversineKm(
+                depAirport?.latitude,
+                depAirport?.longitude,
+                arrAirport?.latitude,
+                arrAirport?.longitude
+            )
+            val duration = FlightScheduleTimes.durationMinutes(
+                departureMillis = departureMillis,
+                arrivalMillis = arrivalMillis,
+                departureTimeZoneId = depAirport?.timeZoneId,
+                arrivalTimeZoneId = arrAirport?.timeZoneId,
+                distanceKm = distance
+            ).toInt()
+            val ok = journeyRepository.updateFlightSchedule(
+                flightId = flight.id,
+                departureAirportCode = departureAirportCode,
+                arrivalAirportCode = arrivalAirportCode,
+                departureAirportName = depAirport?.name ?: flight.departureAirportName,
+                arrivalAirportName = arrAirport?.name ?: flight.arrivalAirportName,
+                departureCity = depAirport?.city ?: flight.departureCity,
+                arrivalCity = arrAirport?.city ?: flight.arrivalCity,
+                departureCountryCode = depAirport?.countryCode ?: flight.departureCountryCode,
+                arrivalCountryCode = arrAirport?.countryCode ?: flight.arrivalCountryCode,
+                departureTimeMillis = departureMillis,
+                arrivalTimeMillis = arrivalMillis,
+                airline = airline,
+                flightNumber = flightNumber,
+                durationMinutes = duration.takeIf { it > 0 },
+                distanceKm = distance
+            )
+            _uiState.value = _uiState.value.copy(
+                message = if (ok) "Flight updated. Legs re-sorted by departure time." else null,
+                errorMessage = if (ok) null else "Could not update flight. Check airports and times."
+            )
+        }
+    }
+
+    fun removeFlightFromJourney(flightId: Long) {
+        viewModelScope.launch {
+            val ok = journeyRepository.removeFlightFromJourney(journeyId, flightId)
+            _uiState.value = _uiState.value.copy(
+                message = if (ok) "Flight removed from journey." else null,
+                errorMessage = if (ok) null else "Could not remove flight."
             )
         }
     }

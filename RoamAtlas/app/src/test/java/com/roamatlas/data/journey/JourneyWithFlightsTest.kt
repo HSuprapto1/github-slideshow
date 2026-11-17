@@ -7,6 +7,42 @@ import org.junit.Test
 
 class JourneyWithFlightsTest {
     @Test
+    fun `legs sort by departure time even when sequence is out of order`() {
+        val later = flight(
+            id = 1,
+            departure = "SIN",
+            arrival = "CDG",
+            departureTime = 10_000_000,
+            arrivalTime = 20_000_000
+        ).copy(journeySequence = 0)
+        val earlier = flight(
+            id = 2,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_000_000
+        ).copy(journeySequence = 1)
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "Out of order add",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "FR",
+                destinationCity = "Paris",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(later, earlier)
+        )
+        assertEquals(listOf(2L, 1L), journey.orderedFlights.map { it.id })
+        assertEquals("CGK", journey.orderedFlights.first().departureAirportCode)
+    }
+
+    @Test
     fun `arrival delay reduces connection and triggers warning`() {
         val first = flight(
             id = 1,
