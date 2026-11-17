@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import androidx.core.content.FileProvider
 import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.flight.FlightScheduleTimes
+import com.roamatlas.data.local.entity.TransportMode
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -89,79 +91,118 @@ object JourneyShareFormatter {
         airports: Map<String, Airport>,
         includeBookingReferences: Boolean,
         includeNotes: Boolean
-    ): String = buildString {
-        appendLine(journey.journey.name)
-        appendLine(
-            journey.orderedFlights.joinToString(" → ") { it.departureAirportCode } +
-                journey.orderedFlights.lastOrNull()?.let { " → ${it.arrivalAirportCode}" }.orEmpty()
-        )
-        appendLine(
-            "${journey.flights.size} flights · ${journey.connections.size} connections · " +
-                "${formatMinutes(journey.totalJourneyMinutes)} total"
-        )
-        appendLine()
-        journey.orderedFlights.forEachIndexed { index, flight ->
-            val departure = airports[flight.departureAirportCode]
-            val arrival = airports[flight.arrivalAirportCode]
+    ): String {
+        val legs = journey.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
+        val flyMinutes = legs.map { flight ->
+            val dep = airports[flight.departureAirportCode]
+            val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                ?: flight.arrivalAirportCode
+            FlightScheduleTimes.durationMinutes(flight, dep, airports[arrCode])
+        }
+        val transitMinutes = legs.zipWithNext().map { (a, b) ->
+            ((b.departureTimeMillis - a.arrivalTimeMillis) / 60_000L).coerceAtLeast(0)
+        }
+        val totalFly = flyMinutes.sum()
+        val totalTransit = transitMinutes.sum()
+        val totalJourney = totalFly + totalTransit
+
+        return buildString {
+            appendLine(journey.journey.name)
+            if (legs.isNotEmpty()) {
+                appendLine(
+                    legs.joinToString(" → ") { it.departureAirportCode } +
+                        " → ${legs.last().arrivalAirportCode}"
+                )
+            }
             appendLine(
-                "${index + 1}. ${listOfNotNull(flight.airline, flight.flightNumber).joinToString(" · ").ifBlank { "Flight" }}"
+                "${legs.size} flight${if (legs.size == 1) "" else "s"} · " +
+                    "${transitMinutes.size} transit${if (transitMinutes.size == 1) "" else "s"}"
             )
-            appendLine(
-                "   ${flight.departureAirportCode} ${departure?.name ?: flight.departureAirportName.orEmpty()}"
-            )
-            appendLine("   ${formatTime(flight.departureTimeMillis)}")
-            appendLine(
-                "   → ${flight.arrivalAirportCode} ${arrival?.name ?: flight.arrivalAirportName.orEmpty()}"
-            )
-            appendLine("   ${formatTime(flight.arrivalTimeMillis)}")
-            if (flight.estimatedDepartureTimeMillis != null || flight.estimatedArrivalTimeMillis != null) {
-                appendLine(
-                    "   Latest estimate: ${formatTime(flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis)}" +
-                        " → ${formatTime(flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis)}"
-                )
-            }
-            val terminal = noteValue(flight.notes, "Departure terminal")
-            val gate = noteValue(flight.notes, "Departure gate")
-            if (terminal != null || gate != null) {
-                appendLine(
-                    "   " + listOfNotNull(
-                        terminal?.let { "Terminal $it" },
-                        gate?.let { "Gate $it" }
-                    ).joinToString(" · ")
-                )
-            }
-            if (flight.aircraftType != null || flight.seatNumber != null) {
-                appendLine(
-                    "   " + listOfNotNull(
-                        flight.aircraftType?.let { "Aircraft: $it" },
-                        flight.seatNumber?.let { "Seat: $it" }
-                    ).joinToString(" · ")
-                )
-            }
-            flight.flightStatus?.let { appendLine("   Status: $it") }
-            if (includeBookingReferences) {
-                flight.bookingReference?.let { appendLine("   Booking reference: $it") }
-            }
-            if (index < journey.connections.size) {
-                val connection = journey.connections[index]
-                appendLine(
-                    "   Transit: ${formatMinutes(connection.effectiveMinutes)}" +
-                        when (connection.risk) {
-                            ConnectionRisk.COMFORTABLE -> ""
-                            ConnectionRisk.TIGHT -> " · potentially tight"
-                            ConnectionRisk.BELOW_RECOMMENDED -> " · below recommended minimum"
-                        }
-                )
-            }
             appendLine()
-        }
-        if (includeNotes) {
-            journey.journey.notes?.let {
-                appendLine("Notes")
-                appendLine(it)
+
+            legs.forEachIndexed { index, flight ->
+                val departure = airports[flight.departureAirportCode]
+                val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+                val arrival = airports[arrCode]
+                appendLine(
+                    "${index + 1}. ${
+                        listOfNotNull(flight.airline, flight.flightNumber)
+                            .joinToString(" · ")
+                            .ifBlank { TransportMode.label(flight.transportMode) }
+                    }"
+                )
+                appendLine(
+                    "   ${flight.departureAirportCode} ${departure?.name ?: flight.departureAirportName.orEmpty()}"
+                )
+                appendLine("   ${formatTime(flight.departureTimeMillis)}")
+                appendLine(
+                    "   → $arrCode ${arrival?.name ?: flight.arrivalAirportName.orEmpty()}"
+                )
+                appendLine("   ${formatTime(flight.arrivalTimeMillis)}")
+                appendLine("   Fly time · ${formatMinutes(flyMinutes[index])}")
+                if (flight.estimatedDepartureTimeMillis != null ||
+                    flight.estimatedArrivalTimeMillis != null
+                ) {
+                    appendLine(
+                        "   Latest estimate: ${
+                            formatTime(
+                                flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+                            )
+                        }" +
+                            " → ${
+                                formatTime(
+                                    flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+                                )
+                            }"
+                    )
+                }
+                val terminal = noteValue(flight.notes, "Departure terminal")
+                val gate = noteValue(flight.notes, "Departure gate")
+                if (terminal != null || gate != null) {
+                    appendLine(
+                        "   " + listOfNotNull(
+                            terminal?.let { "Terminal $it" },
+                            gate?.let { "Gate $it" }
+                        ).joinToString(" · ")
+                    )
+                }
+                if (flight.aircraftType != null || flight.seatNumber != null) {
+                    appendLine(
+                        "   " + listOfNotNull(
+                            flight.aircraftType?.let { "Aircraft: $it" },
+                            flight.seatNumber?.let { "Seat: $it" }
+                        ).joinToString(" · ")
+                    )
+                }
+                flight.flightStatus?.let { appendLine("   Status: $it") }
+                if (includeBookingReferences) {
+                    flight.bookingReference?.let { appendLine("   Booking reference: $it") }
+                }
+                appendLine()
+                if (index < transitMinutes.size) {
+                    appendLine(
+                        "   Transit at $arrCode · ${formatMinutes(transitMinutes[index])}"
+                    )
+                    appendLine()
+                }
             }
+
+            appendLine("Totals")
+            appendLine("   Total journey (with transit) · ${formatMinutes(totalJourney)}")
+            appendLine("   Total fly time · ${formatMinutes(totalFly)}")
+            appendLine("   Total transit time · ${formatMinutes(totalTransit)}")
+            appendLine()
+
+            if (includeNotes) {
+                journey.journey.notes?.let {
+                    appendLine("Notes")
+                    appendLine(it)
+                    appendLine()
+                }
+            }
+            appendLine("Shared from RoamAtlas")
         }
-        appendLine("Shared from RoamAtlas")
     }
 
     private fun renderCard(
