@@ -244,51 +244,65 @@ fun JourneyDetailScreen(
                         }
                     }
                 }
-                items(value.orderedFlights, key = { it.id }) { flight ->
-                    FlightLegCard(
-                        flight = flight,
-                        departureAirport = state.airports[flight.departureAirportCode],
-                        arrivalAirport = state.airports[
-                            flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
-                                ?: flight.arrivalAirportCode
-                        ],
-                        onEdit = { editingFlight = flight },
-                        onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
-                        onMarkMissed = { viewModel.markLegMissed(flight.id) },
-                        onMarkDiverted = { code -> viewModel.markLegDiverted(flight.id, code) },
-                        onMarkArrived = { viewModel.markLegArrived(flight.id) },
-                        onNotThisJourney = { viewModel.markNotThisJourney(flight.id) },
-                        onResetPlanned = { viewModel.resetLegPlanned(flight.id) },
-                        onSetTicketPhoto = { uri ->
-                            viewModel.setFlightTicketPhoto(flight.id, uri)
-                        },
-                        onClearTicketPhoto = {
-                            viewModel.setFlightTicketPhoto(flight.id, null)
-                        },
-                        onOpenTicketPhoto = { uri ->
-                            if (isPdfAttachment(uri)) {
-                                previewPdfUri = uri
-                            } else {
-                                fullscreenPhotos = listOf(uri)
-                                fullscreenIndex = 0
+                value.orderedFlights.forEachIndexed { index, flight ->
+                    item(key = "leg_${flight.id}") {
+                        FlightLegCard(
+                            flight = flight,
+                            departureAirport = state.airports[flight.departureAirportCode],
+                            arrivalAirport = state.airports[
+                                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                                    ?: flight.arrivalAirportCode
+                            ],
+                            onEdit = { editingFlight = flight },
+                            onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
+                            onMarkMissed = { viewModel.markLegMissed(flight.id) },
+                            onMarkDiverted = { code -> viewModel.markLegDiverted(flight.id, code) },
+                            onMarkArrived = { viewModel.markLegArrived(flight.id) },
+                            onNotThisJourney = { viewModel.markNotThisJourney(flight.id) },
+                            onResetPlanned = { viewModel.resetLegPlanned(flight.id) },
+                            onSetTicketPhoto = { uri ->
+                                viewModel.setFlightTicketPhoto(flight.id, uri)
+                            },
+                            onClearTicketPhoto = {
+                                viewModel.setFlightTicketPhoto(flight.id, null)
+                            },
+                            onOpenTicketPhoto = { uri ->
+                                if (isPdfAttachment(uri)) {
+                                    previewPdfUri = uri
+                                } else {
+                                    fullscreenPhotos = listOf(uri)
+                                    fullscreenIndex = 0
+                                }
                             }
-                        }
-                    )
-                }
-                if (value.connections.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Connections",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "Warnings use your chosen minimum, or a conservative default of 2 hours at the same airport and 4 hours for an airport change.",
-                            style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    items(value.connections) { connection ->
-                        ConnectionCard(connection)
+                    // Transit between this leg and the next travel leg — shown inline.
+                    val connection = value.connections.firstOrNull {
+                        it.arrivingFlight.id == flight.id
+                    }
+                    if (connection != null) {
+                        item(key = "conn_${flight.id}_${connection.departingFlight.id}") {
+                            ConnectionBetweenLegsCard(connection)
+                        }
+                    } else if (
+                        index < value.orderedFlights.lastIndex &&
+                        !TransportMode.isHotel(flight.transportMode) &&
+                        !TransportMode.isHotel(value.orderedFlights[index + 1].transportMode)
+                    ) {
+                        // Fallback if connection list skipped a pair (e.g. timing edge).
+                        val next = value.orderedFlights[index + 1]
+                        val minutes = (
+                            (next.estimatedDepartureTimeMillis ?: next.departureTimeMillis) -
+                                (flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis)
+                            ) / 60_000
+                        item(key = "gap_${flight.id}_${next.id}") {
+                            SimpleTransitStrip(
+                                airportCode = flight.actualArrivalAirportCode
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: flight.arrivalAirportCode,
+                                transitMinutes = minutes
+                            )
+                        }
                     }
                 }
                 if (state.journeyDays.isNotEmpty() || state.timelinePhotos.isNotEmpty()) {
@@ -563,6 +577,26 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                             " → ${route.last().arrivalAirportCode}",
                         style = MaterialTheme.typography.bodyLarge
                     )
+                    val flightTimes = route
+                        .filter { TransportMode.isFlight(it.transportMode) }
+                        .joinToString(" · ") {
+                            "${it.departureAirportCode}→${it.arrivalAirportCode} ${formatDuration(legDurationMinutes(it))}"
+                        }
+                    if (flightTimes.isNotBlank()) {
+                        Text(
+                            flightTimes,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    if (journey.connections.isNotEmpty()) {
+                        Text(
+                            journey.connections.joinToString(" · ") {
+                                "${it.arrivingFlight.arrivalAirportCode} transit ${formatDuration(it.effectiveMinutes)}"
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
             Text(journey.legSummaryText, style = MaterialTheme.typography.bodyMedium)
@@ -1033,49 +1067,84 @@ private fun JourneyRouteMap(
 }
 
 @Composable
-private fun ConnectionCard(connection: JourneyConnection) {
+private fun ConnectionBetweenLegsCard(connection: JourneyConnection) {
     val background = when (connection.risk) {
         ConnectionRisk.COMFORTABLE -> MaterialTheme.colorScheme.secondaryContainer
         ConnectionRisk.TIGHT -> Color(0xFFFFE0A3)
         ConnectionRisk.BELOW_RECOMMENDED -> MaterialTheme.colorScheme.errorContainer
     }
+    val airport = connection.arrivingFlight.arrivalAirportCode
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = background)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                "${connection.arrivingFlight.arrivalAirportCode} connection",
+                "Transit at $airport · ${formatDuration(connection.effectiveMinutes)}",
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "${formatDuration(connection.effectiveMinutes)} effective transit · " +
-                    "${formatDuration(connection.recommendedMinimumMinutes.toLong())} recommended minimum"
+                "Between ${connection.arrivingFlight.departureAirportCode}→$airport and " +
+                    "$airport→${connection.departingFlight.arrivalAirportCode}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                "Recommended minimum · ${formatDuration(connection.recommendedMinimumMinutes.toLong())}",
+                style = MaterialTheme.typography.bodySmall
             )
             if (connection.scheduledMinutes != connection.effectiveMinutes) {
-                Text("Originally scheduled: ${formatDuration(connection.scheduledMinutes)}")
+                Text(
+                    "Originally scheduled · ${formatDuration(connection.scheduledMinutes)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             if (connection.airportChange) {
                 Text("Airport change required", fontWeight = FontWeight.Bold)
             }
             if (connection.departingFlight.separateTicketFromPrevious == true) {
-                Text("Separate ticket: missed-connection protection may not apply.")
+                Text(
+                    "Separate ticket: missed-connection protection may not apply.",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             when (connection.risk) {
-                ConnectionRisk.COMFORTABLE -> Text("Connection has a comfortable calculated buffer.")
+                ConnectionRisk.COMFORTABLE -> Text(
+                    "Comfortable connection buffer.",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 ConnectionRisk.TIGHT -> Text(
-                    "Potentially tight connection. Check terminals, immigration, security, and baggage.",
-                    fontWeight = FontWeight.SemiBold
+                    "Tight connection — check terminals, immigration, security, baggage.",
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodySmall
                 )
                 ConnectionRisk.BELOW_RECOMMENDED -> Text(
-                    "Below the recommended minimum. Contact the airline or booking agent to discuss alternatives.",
-                    fontWeight = FontWeight.Bold
+                    "Below recommended minimum — contact airline or booking agent.",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SimpleTransitStrip(airportCode: String, transitMinutes: Long) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Text(
+            "Transit at $airportCode · ${formatDuration(transitMinutes)}",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -1201,6 +1270,16 @@ private fun FlightLegCard(
                         flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis,
                         arrivalAirport
                     )
+                )
+                val durationLabel = formatDuration(legDurationMinutes(flight))
+                Text(
+                    if (TransportMode.isFlight(flight.transportMode)) {
+                        "Flight time · $durationLabel"
+                    } else {
+                        "Travel time · $durationLabel"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
                 )
                 val legStatus = TravelLegStatus.normalize(flight.travelLegStatus)
                 AssistChip(
@@ -1799,6 +1878,13 @@ private fun ShareJourneyDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+private fun legDurationMinutes(flight: FlightEntity): Long {
+    flight.durationMinutes?.takeIf { it > 0 }?.let { return it.toLong() }
+    val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+    val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+    return ((arr - dep) / 60_000L).coerceAtLeast(0)
 }
 
 private fun formatAirportTime(millis: Long, airport: Airport?): String {
