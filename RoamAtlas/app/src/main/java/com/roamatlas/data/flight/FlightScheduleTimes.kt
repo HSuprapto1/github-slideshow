@@ -24,26 +24,21 @@ object FlightScheduleTimes {
         val durationMinutes: Long
     )
 
+    /**
+     * Stable display duration from stored absolute instants.
+     * Do not reinterpret/rewrite times here — that made journey times keep changing.
+     */
     fun durationMinutes(
         flight: FlightEntity,
-        departureAirport: Airport?,
-        arrivalAirport: Airport?
+        departureAirport: Airport? = null,
+        arrivalAirport: Airport? = null
     ): Long {
-        val distance = flight.distanceKm
-            ?: haversineKm(
-                departureAirport?.latitude,
-                departureAirport?.longitude,
-                arrivalAirport?.latitude,
-                arrivalAirport?.longitude
-            )
-        return durationMinutes(
-            departureMillis = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis,
-            arrivalMillis = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis,
-            departureTimeZoneId = departureAirport?.timeZoneId,
-            arrivalTimeZoneId = arrivalAirport?.timeZoneId,
-            distanceKm = distance,
-            storedDurationMinutes = flight.durationMinutes
-        )
+        val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+        val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+        val fromMillis = ((arr - dep) / 60_000L).coerceAtLeast(0)
+        // Prefer stored duration only when it matches the instant difference.
+        val stored = flight.durationMinutes?.takeIf { it > 0 }?.toLong()
+        return if (stored != null && abs(stored - fromMillis) <= 15) stored else fromMillis
     }
 
     fun durationMinutes(
@@ -54,6 +49,7 @@ object FlightScheduleTimes {
         distanceKm: Double? = null,
         storedDurationMinutes: Int? = null
     ): Long {
+        // Used at save/import: build timezone-correct instants first via [normalize], then duration.
         val normalized = normalize(
             departureMillis = departureMillis,
             arrivalMillis = arrivalMillis,
@@ -61,7 +57,6 @@ object FlightScheduleTimes {
             arrivalTimeZoneId = arrivalTimeZoneId,
             distanceKm = distanceKm
         )
-        // Prefer timezone-aware result; only keep stored duration if it matches closely.
         val stored = storedDurationMinutes?.takeIf { it > 0 }?.toLong()
         if (stored != null && abs(stored - normalized.durationMinutes) <= 15) {
             return stored

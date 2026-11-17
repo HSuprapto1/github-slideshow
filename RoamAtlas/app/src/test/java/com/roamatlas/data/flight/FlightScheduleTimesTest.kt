@@ -21,7 +21,7 @@ class FlightScheduleTimesTest {
         val rawHours = (arrWrong - depWrong) / 3_600_000.0
         assertTrue("precondition: naive duration ~7h, was $rawHours", rawHours in 6.5..7.5)
 
-        val minutes = FlightScheduleTimes.durationMinutes(
+        val normalized = FlightScheduleTimes.normalize(
             departureMillis = depWrong,
             arrivalMillis = arrWrong,
             departureTimeZoneId = "Asia/Singapore",
@@ -29,8 +29,8 @@ class FlightScheduleTimesTest {
             distanceKm = 10_700.0
         )
         assertTrue(
-            "expected ~12–15h for SIN→CDG, got ${minutes / 60.0}h",
-            minutes in (12 * 60)..(15 * 60)
+            "expected ~12–15h for SIN→CDG, got ${normalized.durationMinutes / 60.0}h",
+            normalized.durationMinutes in (12 * 60)..(15 * 60)
         )
     }
 

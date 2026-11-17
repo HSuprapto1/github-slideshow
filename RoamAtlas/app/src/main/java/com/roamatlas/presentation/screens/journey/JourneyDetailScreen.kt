@@ -52,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -177,7 +178,7 @@ fun JourneyDetailScreen(
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
-                item { JourneyHeader(value, state.nowMillis, state.airports) }
+                item { JourneyHeader(value, state.nowMillis) }
                 state.suggestedArrivalPlace?.let { placeName ->
                     item {
                         SuggestedArrivalPlaceCard(
@@ -224,7 +225,7 @@ fun JourneyDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Timeline",
+                            "Flights & legs",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -245,15 +246,48 @@ fun JourneyDetailScreen(
                         }
                     }
                 }
-                value.orderedFlights.forEachIndexed { index, flight ->
-                    item(key = "leg_${flight.id}") {
+                item {
+                    SimpleJourneyItinerary(
+                        journey = value,
+                        airports = state.airports,
+                        onEditLeg = { editingFlight = it }
+                    )
+                }
+                items(
+                    value.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) },
+                    key = { "detail_${it.id}" }
+                ) { flight ->
+                    FlightLegActionsCard(
+                        flight = flight,
+                        onEdit = { editingFlight = flight },
+                        onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
+                        onMarkMissed = { viewModel.markLegMissed(flight.id) },
+                        onMarkDiverted = { code -> viewModel.markLegDiverted(flight.id, code) },
+                        onMarkArrived = { viewModel.markLegArrived(flight.id) },
+                        onNotThisJourney = { viewModel.markNotThisJourney(flight.id) },
+                        onResetPlanned = { viewModel.resetLegPlanned(flight.id) },
+                        onSetTicketPhoto = { uri ->
+                            viewModel.setFlightTicketPhoto(flight.id, uri)
+                        },
+                        onClearTicketPhoto = {
+                            viewModel.setFlightTicketPhoto(flight.id, null)
+                        },
+                        onOpenTicketPhoto = { uri ->
+                            if (isPdfAttachment(uri)) {
+                                previewPdfUri = uri
+                            } else {
+                                fullscreenPhotos = listOf(uri)
+                                fullscreenIndex = 0
+                            }
+                        }
+                    )
+                }
+                value.orderedFlights.filter { TransportMode.isHotel(it.transportMode) }.forEach { flight ->
+                    item(key = "hotel_${flight.id}") {
                         FlightLegCard(
                             flight = flight,
                             departureAirport = state.airports[flight.departureAirportCode],
-                            arrivalAirport = state.airports[
-                                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
-                                    ?: flight.arrivalAirportCode
-                            ],
+                            arrivalAirport = state.airports[flight.arrivalAirportCode],
                             onEdit = { editingFlight = flight },
                             onMarkDelayed = { viewModel.markLegDelayed(flight.id) },
                             onMarkMissed = { viewModel.markLegMissed(flight.id) },
@@ -276,34 +310,6 @@ fun JourneyDetailScreen(
                                 }
                             }
                         )
-                    }
-                    // Transit between this leg and the next travel leg — shown inline.
-                    val connection = value.connections.firstOrNull {
-                        it.arrivingFlight.id == flight.id
-                    }
-                    if (connection != null) {
-                        item(key = "conn_${flight.id}_${connection.departingFlight.id}") {
-                            ConnectionBetweenLegsCard(connection)
-                        }
-                    } else if (
-                        index < value.orderedFlights.lastIndex &&
-                        !TransportMode.isHotel(flight.transportMode) &&
-                        !TransportMode.isHotel(value.orderedFlights[index + 1].transportMode)
-                    ) {
-                        // Fallback if connection list skipped a pair (e.g. timing edge).
-                        val next = value.orderedFlights[index + 1]
-                        val minutes = (
-                            (next.estimatedDepartureTimeMillis ?: next.departureTimeMillis) -
-                                (flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis)
-                            ) / 60_000
-                        item(key = "gap_${flight.id}_${next.id}") {
-                            SimpleTransitStrip(
-                                airportCode = flight.actualArrivalAirportCode
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: flight.arrivalAirportCode,
-                                transitMinutes = minutes
-                            )
-                        }
                     }
                 }
                 if (state.journeyDays.isNotEmpty() || state.timelinePhotos.isNotEmpty()) {
@@ -505,8 +511,7 @@ fun JourneyDetailScreen(
 @Composable
 private fun JourneyHeader(
     journey: JourneyWithFlights,
-    now: Long,
-    airports: Map<String, Airport>
+    now: Long
 ) {
     val first = journey.firstDepartureMillis
     val final = journey.finalArrivalMillis
@@ -582,31 +587,6 @@ private fun JourneyHeader(
                             " → ${route.last().arrivalAirportCode}",
                         style = MaterialTheme.typography.bodyLarge
                     )
-                    val flightTimes = route
-                        .filter { TransportMode.isFlight(it.transportMode) }
-                        .joinToString(" · ") {
-                            val mins = legDurationMinutes(
-                                it,
-                                airports[it.departureAirportCode],
-                                airports[it.arrivalAirportCode]
-                            )
-                            "${it.departureAirportCode}→${it.arrivalAirportCode} ${formatDuration(mins)}"
-                        }
-                    if (flightTimes.isNotBlank()) {
-                        Text(
-                            flightTimes,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    if (journey.connections.isNotEmpty()) {
-                        Text(
-                            journey.connections.joinToString(" · ") {
-                                "${it.arrivingFlight.arrivalAirportCode} transit ${formatDuration(it.effectiveMinutes)}"
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
                 }
             }
             Text(journey.legSummaryText, style = MaterialTheme.typography.bodyMedium)
@@ -1073,6 +1053,242 @@ private fun JourneyRouteMap(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SimpleJourneyItinerary(
+    journey: JourneyWithFlights,
+    airports: Map<String, Airport>,
+    onEditLeg: (FlightEntity) -> Unit
+) {
+    val legs = journey.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
+    if (legs.isEmpty()) return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Itinerary",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Times are local at each airport, with that airport’s timezone.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            legs.forEachIndexed { index, flight ->
+                val depAirport = airports[flight.departureAirportCode]
+                val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+                val arrAirport = airports[arrCode]
+                val depMillis = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
+                val arrMillis = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+                val duration = FlightScheduleTimes.durationMinutes(flight, depAirport, arrAirport)
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        buildString {
+                            append(TransportMode.label(flight.transportMode))
+                            append(" ${index + 1}")
+                            listOfNotNull(flight.airline, flight.flightNumber)
+                                .joinToString(" ")
+                                .takeIf { it.isNotBlank() }
+                                ?.let { append(" · $it") }
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Depart ${flight.departureAirportCode} · ${formatLocalAirportStamp(depMillis, depAirport)}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        "Arrive $arrCode · ${formatLocalAirportStamp(arrMillis, arrAirport)}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        "Flight time · ${formatDuration(duration)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    TextButton(onClick = { onEditLeg(flight) }) { Text("Update times") }
+                }
+
+                if (index < legs.lastIndex) {
+                    val next = legs[index + 1]
+                    val connection = journey.connections.firstOrNull {
+                        it.arrivingFlight.id == flight.id && it.departingFlight.id == next.id
+                    }
+                    val transitMinutes = connection?.effectiveMinutes
+                        ?: (
+                            (next.estimatedDepartureTimeMillis ?: next.departureTimeMillis) -
+                                arrMillis
+                            ) / 60_000
+                    val hub = arrCode
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            "Transit at $hub · ${formatDuration(transitMinutes)}",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlightLegActionsCard(
+    flight: FlightEntity,
+    onEdit: () -> Unit,
+    onMarkDelayed: () -> Unit,
+    onMarkMissed: () -> Unit,
+    onMarkDiverted: (String) -> Unit,
+    onMarkArrived: () -> Unit,
+    onNotThisJourney: () -> Unit,
+    onResetPlanned: () -> Unit,
+    onSetTicketPhoto: (Uri) -> Unit,
+    onClearTicketPhoto: () -> Unit,
+    onOpenTicketPhoto: (String) -> Unit
+) {
+    var showDivertDialog by remember { mutableStateOf(false) }
+    var divertCode by remember { mutableStateOf("") }
+    var showAttachDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(onSetTicketPhoto) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { saved ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        if (saved && uri != null) onSetTicketPhoto(publishCapturedPhotoToGallery(context, uri))
+        else if (uri != null) runCatching { context.contentResolver.delete(uri, null, null) }
+    }
+    fun launchCamera() {
+        val uri = createPlaceCameraPhotoUri(context) ?: return
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) launchCamera() }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${flight.departureAirportCode} → ${flight.arrivalAirportCode}",
+                    fontWeight = FontWeight.SemiBold
+                )
+                TextButton(onClick = onEdit) { Text("Update") }
+            }
+            AssistChip(
+                onClick = {},
+                enabled = false,
+                label = { Text(TravelLegStatus.label(flight.travelLegStatus)) }
+            )
+            TravelLegActionsRow(
+                onMarkDelayed = onMarkDelayed,
+                onMarkMissed = onMarkMissed,
+                onMarkDiverted = { showDivertDialog = true },
+                onMarkArrived = onMarkArrived,
+                onNotThisJourney = onNotThisJourney,
+                onResetPlanned = onResetPlanned
+            )
+            val ticketUri = flight.photoUri
+            if (!ticketUri.isNullOrBlank()) {
+                OutlinedButton(onClick = { onOpenTicketPhoto(ticketUri) }) {
+                    Text("Open ticket")
+                }
+                TextButton(onClick = onClearTicketPhoto) { Text("Remove ticket") }
+            } else {
+                OutlinedButton(onClick = { showAttachDialog = true }) {
+                    Text("Add ticket photo or PDF")
+                }
+            }
+        }
+    }
+    if (showAttachDialog) {
+        AlertDialog(
+            onDismissRequest = { showAttachDialog = false },
+            title = { Text("Attach ticket") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showAttachDialog = false
+                            documentLauncher.launch(arrayOf("image/*", "application/pdf"))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Gallery / Files") }
+                    TextButton(
+                        onClick = {
+                            showAttachDialog = false
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) launchCamera()
+                            else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Camera") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAttachDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (showDivertDialog) {
+        AlertDialog(
+            onDismissRequest = { showDivertDialog = false },
+            title = { Text("Diverted to…") },
+            text = {
+                OutlinedTextField(
+                    value = divertCode,
+                    onValueChange = { divertCode = it.uppercase().take(4) },
+                    label = { Text("Airport code") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val code = divertCode.trim()
+                        if (code.length >= 3) {
+                            showDivertDialog = false
+                            onMarkDiverted(code)
+                            divertCode = ""
+                        }
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDivertDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -1898,13 +2114,28 @@ private fun legDurationMinutes(
     arrivalAirport: Airport?
 ): Long = FlightScheduleTimes.durationMinutes(flight, departureAirport, arrivalAirport)
 
-private fun formatAirportTime(millis: Long, airport: Airport?): String {
-    val formatter = SimpleDateFormat("EEE, d MMM yyyy · HH:mm", Locale.getDefault())
-    airport?.timeZoneId?.let { zone ->
-        runCatching { formatter.timeZone = TimeZone.getTimeZone(zone) }
+private fun formatAirportTime(millis: Long, airport: Airport?): String =
+    formatLocalAirportStamp(millis, airport)
+
+/** Stable local stamp at the airport timezone (does not rewrite stored millis). */
+private fun formatLocalAirportStamp(millis: Long, airport: Airport?): String {
+    val formatter = SimpleDateFormat("EEE d MMM yyyy · HH:mm", Locale.getDefault())
+    val zoneId = airport?.timeZoneId
+    val tz = if (!zoneId.isNullOrBlank()) {
+        runCatching { TimeZone.getTimeZone(zoneId) }.getOrNull()
+    } else {
+        null
     }
-    return formatter.format(Date(millis)) +
-        airport?.timeZoneId?.let { " (${it.substringAfterLast('/')})" }.orEmpty()
+    if (tz != null) formatter.timeZone = tz
+    val stamp = formatter.format(Date(millis))
+    val shortTz = tz?.getDisplayName(tz.inDaylightTime(Date(millis)), TimeZone.SHORT, Locale.US)
+    val city = zoneId?.substringAfterLast('/')?.replace('_', ' ')
+        ?: airport?.city?.takeIf { it.isNotBlank() }
+    val zoneLabel = listOfNotNull(shortTz, city)
+        .distinct()
+        .joinToString(" ")
+        .takeIf { it.isNotBlank() }
+    return if (zoneLabel != null) "$stamp · $zoneLabel" else stamp
 }
 
 private fun noteValue(notes: String?, label: String): String? =

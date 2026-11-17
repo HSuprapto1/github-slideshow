@@ -90,10 +90,7 @@ class JourneyDetailViewModel @Inject constructor(
                     )
                 }.filterNotNull()
                 val airports = airportRepository.getByIataCodes(codes)
-                if (journey != null) {
-                    // Repair long-haul durations stored without airport timezones.
-                    journeyRepository.normalizeFlightSchedules(journey.flights, airports)
-                }
+                // Do not rewrite stored flight times here — that made times keep changing.
                 val suggested = journey?.let {
                     if (!it.isCompleted && !it.isCancelled) {
                         journeyTravelDetector.suggestedArrivalPlace(journeyId)
