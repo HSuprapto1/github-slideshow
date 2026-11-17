@@ -24,8 +24,8 @@ class FlightScheduleTimesTest {
         val arr = LocalDateTime.of(2026, 11, 17, 20, 55).atZone(zone).toInstant().toEpochMilli()
         val flight = flight("CGK", "SIN", dep, arr)
         val minutes = FlightScheduleTimes.durationMinutes(flight, cgk, sin)
-        // Ticket local clocks: 18:10 → 20:55 = 2h 45m (do not TZ-inflate).
-        assertEquals(165L, minutes)
+        // Jakarta UTC+7 / Singapore UTC+8 → real block ~1h 45m, not 2h 45m clocks.
+        assertTrue("CGK→SIN expected ~1h45m, got ${minutes}m", minutes in 100..120)
     }
 
     @Test

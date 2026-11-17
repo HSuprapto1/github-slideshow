@@ -27,13 +27,12 @@ object FlightScheduleTimes {
     )
 
     /**
-     * Display / block time for a stored flight. Does not mutate the entity.
+     * Real block / fly time. Does not mutate stored ticket times.
      *
-     * Uses scheduled ticket times only (not estimates).
-     * - Regional hops (< ~3000 km): trust the printed local clock gap
-     *   (CGK 18:10 → SIN 20:55 = 2h 45m), never inflate to nonsense hours.
-     * - Long-haul: interpret wall clocks in each airport TZ so SIN→CDG
-     *   is ~13h, not the naive ~7h.
+     * Ticket clocks are local at each airport. Convert both to real instants
+     * with airport timezones, then subtract:
+     * - CGK 18:10 (UTC+7) → SIN 20:55 (UTC+8) = 1h 45m
+     * - CDG 10:55 (UTC+1) → GIG 18:30 (UTC−3) = 11h 35m
      */
     fun durationMinutes(
         flight: FlightEntity,
@@ -43,24 +42,17 @@ object FlightScheduleTimes {
         val dep = flight.departureTimeMillis
         val arr = flight.arrivalTimeMillis
         val raw = ((arr - dep) / 60_000L).coerceAtLeast(0)
-        val stored = flight.durationMinutes?.takeIf { it > 0 }?.toLong()
-        if (stored != null && abs(stored - raw) <= 15) return stored
-
+        val depZone = departureAirport?.timeZoneId
+        val arrZone = arrivalAirport?.timeZoneId
+        if (depZone.isNullOrBlank() || arrZone.isNullOrBlank()) {
+            return flight.durationMinutes?.takeIf { it > 0 }?.toLong() ?: raw
+        }
         val distance = flight.distanceKm ?: haversineKm(
             departureAirport?.latitude,
             departureAirport?.longitude,
             arrivalAirport?.latitude,
             arrivalAirport?.longitude
         )
-        val depZone = departureAirport?.timeZoneId
-        val arrZone = arrivalAirport?.timeZoneId
-        // Short / regional: printed schedule gap is what the ticket shows.
-        if (distance == null || distance < 3_000.0 ||
-            depZone.isNullOrBlank() || arrZone.isNullOrBlank()
-        ) {
-            return raw
-        }
-
         val normalized = normalize(
             departureMillis = dep,
             arrivalMillis = arr,
@@ -68,8 +60,11 @@ object FlightScheduleTimes {
             arrivalTimeZoneId = arrZone,
             distanceKm = distance
         ).durationMinutes
-        // Safety: never replace a sensible regional-looking raw with a huge jump.
-        if (normalized > raw + 10 * 60 && distance < 6_000.0) return raw
+        // Guard: short hop must never become an overnight ~17h glitch.
+        if (distance != null && distance < 2_500.0 && normalized > 6 * 60) {
+            return if (raw in 30..(6 * 60)) raw else normalized
+        }
+        val stored = flight.durationMinutes?.takeIf { it > 0 }?.toLong()
         if (stored != null && abs(stored - normalized) <= 20) return stored
         return normalized
     }

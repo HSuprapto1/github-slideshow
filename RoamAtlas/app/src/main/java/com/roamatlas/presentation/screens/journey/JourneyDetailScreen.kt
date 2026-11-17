@@ -46,6 +46,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -196,12 +197,6 @@ fun JourneyDetailScreen(
                             onDismiss = viewModel::dismissPhotosSinceAirportPrompt
                         )
                     }
-                }
-                item {
-                    JourneyTravelSummaryCard(
-                        journey = value,
-                        airports = state.airports
-                    )
                 }
                 item {
                     JourneyStatusActions(
@@ -677,64 +672,6 @@ private fun PhotosSinceAirportCard(
 }
 
 @Composable
-private fun JourneyTravelSummaryCard(
-    journey: JourneyWithFlights,
-    airports: Map<String, Airport>
-) {
-    val legs = journey.travelLegs
-    if (legs.isEmpty()) return
-    // Same math as the itinerary rows — never the old raw door-to-door shortcut.
-    val flightMinutes = legs.sumOf { flight ->
-        val dep = airports[flight.departureAirportCode]
-        val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
-            ?: flight.arrivalAirportCode
-        val arr = airports[arrCode]
-        FlightScheduleTimes.durationMinutes(flight, dep, arr)
-    }
-    val transitMinutes = legs.zipWithNext().sumOf { (a, b) ->
-        ((b.departureTimeMillis - a.arrivalTimeMillis) / 60_000L).coerceAtLeast(0)
-    }
-    val totalMinutes = flightMinutes + transitMinutes
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                "Travel summary",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "Totals match the itinerary below (flight times + transit).",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "Total trip time · ${formatDuration(totalMinutes)}",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "Flight time · ${formatDuration(flightMinutes)}",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                "Transit time · ${formatDuration(transitMinutes)}",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            if (journey.stillTravelingAfterBookedLegs) {
-                Text(
-                    "Booked legs settled — journey still open for ground travel and photos.",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun JourneyStatusActions(
     journey: JourneyWithFlights,
     onMarkCompleted: () -> Unit,
@@ -1078,6 +1015,19 @@ private fun SimpleJourneyItinerary(
 ) {
     val legs = journey.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
     if (legs.isEmpty()) return
+    val flyMinutes = legs.map { flight ->
+        val dep = airports[flight.departureAirportCode]
+        val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+            ?: flight.arrivalAirportCode
+        FlightScheduleTimes.durationMinutes(flight, dep, airports[arrCode])
+    }
+    val transitMinutesList = legs.zipWithNext().map { (a, b) ->
+        ((b.departureTimeMillis - a.arrivalTimeMillis) / 60_000L).coerceAtLeast(0)
+    }
+    val totalFly = flyMinutes.sum()
+    val totalTransit = transitMinutesList.sum()
+    val totalJourney = totalFly + totalTransit
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1089,7 +1039,7 @@ private fun SimpleJourneyItinerary(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Same times as Share — ticket local times in 24-hour format.",
+                "Local ticket times · fly time uses each airport’s timezone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1098,10 +1048,9 @@ private fun SimpleJourneyItinerary(
                 val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
                     ?: flight.arrivalAirportCode
                 val arrAirport = airports[arrCode]
-                // Scheduled ticket times only (same as Share). Estimates are shown separately.
                 val depMillis = flight.departureTimeMillis
                 val arrMillis = flight.arrivalTimeMillis
-                val duration = FlightScheduleTimes.durationMinutes(flight, depAirport, arrAirport)
+                val duration = flyMinutes[index]
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -1117,68 +1066,31 @@ private fun SimpleJourneyItinerary(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "${flight.departureAirportCode} ${depAirport?.name ?: flight.departureAirportName.orEmpty()}",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        formatTicketStamp(depMillis),
+                        "${flight.departureAirportCode} → $arrCode",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        "→ $arrCode ${arrAirport?.name ?: flight.arrivalAirportName.orEmpty()}",
+                        "${formatTicketStamp(depMillis)}  →  ${formatTicketStamp(arrMillis)}",
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        formatTicketStamp(arrMillis),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "Flight time · ${formatDuration(duration)}",
+                        "Fly time · ${formatDuration(duration)}",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
-                    if (flight.estimatedDepartureTimeMillis != null ||
-                        flight.estimatedArrivalTimeMillis != null
-                    ) {
-                        Text(
-                            "Estimate · ${formatTicketStamp(
-                                flight.estimatedDepartureTimeMillis ?: depMillis
-                            )} → ${formatTicketStamp(
-                                flight.estimatedArrivalTimeMillis ?: arrMillis
-                            )}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     TextButton(onClick = { onEditLeg(flight) }) { Text("Update times") }
                 }
 
                 if (index < legs.lastIndex) {
-                    val next = legs[index + 1]
-                    // Scheduled transit (arrival → next departure), same as Share.
-                    val transitMinutes =
-                        (next.departureTimeMillis - flight.arrivalTimeMillis) / 60_000L
                     val hub = arrCode
-                    val riskNote = journey.connections.firstOrNull {
-                        it.arrivingFlight.id == flight.id && it.departingFlight.id == next.id
-                    }?.risk
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
-                            buildString {
-                                append("Transit at $hub · ${formatDuration(transitMinutes)}")
-                                when (riskNote) {
-                                    ConnectionRisk.BELOW_RECOMMENDED ->
-                                        append(" · below recommended minimum")
-                                    ConnectionRisk.TIGHT -> append(" · potentially tight")
-                                    else -> Unit
-                                }
-                            },
+                            "Transit at $hub · ${formatDuration(transitMinutesList[index])}",
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
@@ -1186,6 +1098,26 @@ private fun SimpleJourneyItinerary(
                     }
                 }
             }
+
+            HorizontalDivider()
+            Text(
+                "Totals",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Total journey (with transit) · ${formatDuration(totalJourney)}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Total fly time · ${formatDuration(totalFly)}",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                "Total transit time · ${formatDuration(totalTransit)}",
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
     }
 }
