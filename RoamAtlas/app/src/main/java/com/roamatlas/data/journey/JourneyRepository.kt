@@ -715,54 +715,15 @@ class JourneyRepository @Inject constructor(
     }
 
     /**
-     * Fix flight times that were stored without airport timezones
-     * (classic long-haul under-count, e.g. SIN→CDG showing ~7h).
+     * Intentionally a no-op. Rewriting stored ticket times on journey open
+     * made CGK/SIN times and transit flip. Duration is computed at display
+     * time only via [FlightScheduleTimes.durationMinutes].
      */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun normalizeFlightSchedules(
         flights: List<FlightEntity>,
         airports: Map<String, Airport>
-    ): Int {
-        var updated = 0
-        flights.forEach { flight ->
-            if (TransportMode.isHotel(flight.transportMode)) return@forEach
-            val dep = airports[flight.departureAirportCode]
-            val arr = airports[
-                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
-                    ?: flight.arrivalAirportCode
-            ]
-            if (dep?.timeZoneId.isNullOrBlank() || arr?.timeZoneId.isNullOrBlank()) return@forEach
-            val distance = flight.distanceKm ?: FlightScheduleTimes.haversineKm(
-                dep?.latitude,
-                dep?.longitude,
-                arr?.latitude,
-                arr?.longitude
-            )
-            val schedule = FlightScheduleTimes.normalize(
-                departureMillis = flight.departureTimeMillis,
-                arrivalMillis = flight.arrivalTimeMillis,
-                departureTimeZoneId = dep?.timeZoneId,
-                arrivalTimeZoneId = arr?.timeZoneId,
-                distanceKm = distance
-            )
-            val durationChanged = flight.durationMinutes == null ||
-                abs((flight.durationMinutes ?: 0) - schedule.durationMinutes.toInt()) > 20
-            val timesChanged =
-                abs(flight.departureTimeMillis - schedule.departureMillis) > 60_000L ||
-                    abs(flight.arrivalTimeMillis - schedule.arrivalMillis) > 60_000L
-            if (!durationChanged && !timesChanged) return@forEach
-            flightDao.update(
-                flight.copy(
-                    departureTimeMillis = schedule.departureMillis,
-                    arrivalTimeMillis = schedule.arrivalMillis,
-                    durationMinutes = schedule.durationMinutes.toInt(),
-                    distanceKm = distance ?: flight.distanceKm,
-                    updatedAtMillis = System.currentTimeMillis()
-                )
-            )
-            updated++
-        }
-        return updated
-    }
+    ): Int = 0
 
     /** Keep the journey date shell open through today while still traveling. */
     suspend fun ensureOpenThroughToday(journeyId: Long) {

@@ -1075,7 +1075,7 @@ private fun SimpleJourneyItinerary(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Times are local at each airport, with that airport’s timezone.",
+                "Same times as Share — ticket local times in 24-hour format.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1084,57 +1084,87 @@ private fun SimpleJourneyItinerary(
                 val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
                     ?: flight.arrivalAirportCode
                 val arrAirport = airports[arrCode]
-                val depMillis = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
-                val arrMillis = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
+                // Scheduled ticket times only (same as Share). Estimates are shown separately.
+                val depMillis = flight.departureTimeMillis
+                val arrMillis = flight.arrivalTimeMillis
                 val duration = FlightScheduleTimes.durationMinutes(flight, depAirport, arrAirport)
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         buildString {
-                            append(TransportMode.label(flight.transportMode))
-                            append(" ${index + 1}")
-                            listOfNotNull(flight.airline, flight.flightNumber)
-                                .joinToString(" ")
-                                .takeIf { it.isNotBlank() }
-                                ?.let { append(" · $it") }
+                            append("${index + 1}. ")
+                            append(
+                                listOfNotNull(flight.airline, flight.flightNumber)
+                                    .joinToString(" · ")
+                                    .ifBlank { TransportMode.label(flight.transportMode) }
+                            )
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Depart ${flight.departureAirportCode} · ${formatLocalAirportStamp(depMillis, depAirport)}",
+                        "${flight.departureAirportCode} ${depAirport?.name ?: flight.departureAirportName.orEmpty()}",
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        "Arrive $arrCode · ${formatLocalAirportStamp(arrMillis, arrAirport)}",
+                        formatTicketStamp(depMillis),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "→ $arrCode ${arrAirport?.name ?: flight.arrivalAirportName.orEmpty()}",
                         style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        formatTicketStamp(arrMillis),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
                     )
                     Text(
                         "Flight time · ${formatDuration(duration)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
                     )
+                    if (flight.estimatedDepartureTimeMillis != null ||
+                        flight.estimatedArrivalTimeMillis != null
+                    ) {
+                        Text(
+                            "Estimate · ${formatTicketStamp(
+                                flight.estimatedDepartureTimeMillis ?: depMillis
+                            )} → ${formatTicketStamp(
+                                flight.estimatedArrivalTimeMillis ?: arrMillis
+                            )}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     TextButton(onClick = { onEditLeg(flight) }) { Text("Update times") }
                 }
 
                 if (index < legs.lastIndex) {
                     val next = legs[index + 1]
-                    val connection = journey.connections.firstOrNull {
-                        it.arrivingFlight.id == flight.id && it.departingFlight.id == next.id
-                    }
-                    val transitMinutes = connection?.effectiveMinutes
-                        ?: (
-                            (next.estimatedDepartureTimeMillis ?: next.departureTimeMillis) -
-                                arrMillis
-                            ) / 60_000
+                    // Scheduled transit (arrival → next departure), same as Share.
+                    val transitMinutes =
+                        (next.departureTimeMillis - flight.arrivalTimeMillis) / 60_000L
                     val hub = arrCode
+                    val riskNote = journey.connections.firstOrNull {
+                        it.arrivingFlight.id == flight.id && it.departingFlight.id == next.id
+                    }?.risk
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
-                            "Transit at $hub · ${formatDuration(transitMinutes)}",
+                            buildString {
+                                append("Transit at $hub · ${formatDuration(transitMinutes)}")
+                                when (riskNote) {
+                                    ConnectionRisk.BELOW_RECOMMENDED ->
+                                        append(" · below recommended minimum")
+                                    ConnectionRisk.TIGHT -> append(" · potentially tight")
+                                    else -> Unit
+                                }
+                            },
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
@@ -2115,28 +2145,18 @@ private fun legDurationMinutes(
 ): Long = FlightScheduleTimes.durationMinutes(flight, departureAirport, arrivalAirport)
 
 private fun formatAirportTime(millis: Long, airport: Airport?): String =
-    formatLocalAirportStamp(millis, airport)
+    formatTicketStamp(millis)
 
-/** Stable local stamp at the airport timezone (does not rewrite stored millis). */
-private fun formatLocalAirportStamp(millis: Long, airport: Airport?): String {
-    val formatter = SimpleDateFormat("EEE d MMM yyyy · HH:mm", Locale.getDefault())
-    val zoneId = airport?.timeZoneId
-    val tz = if (!zoneId.isNullOrBlank()) {
-        runCatching { TimeZone.getTimeZone(zoneId) }.getOrNull()
-    } else {
-        null
-    }
-    if (tz != null) formatter.timeZone = tz
-    val stamp = formatter.format(Date(millis))
-    val shortTz = tz?.getDisplayName(tz.inDaylightTime(Date(millis)), TimeZone.SHORT, Locale.US)
-    val city = zoneId?.substringAfterLast('/')?.replace('_', ' ')
-        ?: airport?.city?.takeIf { it.isNotBlank() }
-    val zoneLabel = listOfNotNull(shortTz, city)
-        .distinct()
-        .joinToString(" ")
-        .takeIf { it.isNotBlank() }
-    return if (zoneLabel != null) "$stamp · $zoneLabel" else stamp
-}
+/**
+ * Ticket wall-clock in 24-hour format — same as [JourneyShareFormatter].
+ * Do not convert into airport timezones here; that shifted CGK/SIN times and
+ * made durations/transit look wrong.
+ */
+private fun formatTicketStamp(millis: Long): String =
+    SimpleDateFormat("EEE, d MMM yyyy HH:mm", Locale.getDefault()).format(Date(millis))
+
+private fun formatLocalAirportStamp(millis: Long, airport: Airport?): String =
+    formatTicketStamp(millis)
 
 private fun noteValue(notes: String?, label: String): String? =
     notes?.lineSequence()

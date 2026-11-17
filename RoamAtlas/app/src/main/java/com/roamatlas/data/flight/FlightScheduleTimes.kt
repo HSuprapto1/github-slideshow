@@ -10,11 +10,13 @@ import java.time.ZoneOffset
 import kotlin.math.abs
 
 /**
- * Flight times on tickets are **local to each airport**. Duration must compare
- * real instants (local wall-clock + airport timezone), not same-zone clock math.
+ * Flight times on tickets are **local at each airport**.
  *
- * Older imports often stored both times in the phone/UTC zone, which under-counts
- * long-haul legs (e.g. SIN→CDG showing ~7h instead of ~13h).
+ * RoamAtlas often stores those wall-clock values as millis in the phone/default
+ * zone (so Share text shows the ticket times). Duration must still compare real
+ * instants: read the printed local time back out, then apply each airport's TZ.
+ *
+ * Never rewrite stored millis from display code — that made times flip.
  */
 object FlightScheduleTimes {
 
@@ -25,20 +27,51 @@ object FlightScheduleTimes {
     )
 
     /**
-     * Stable display duration from stored absolute instants.
-     * Do not reinterpret/rewrite times here — that made journey times keep changing.
+     * Display / block time for a stored flight. Does not mutate the entity.
+     *
+     * Uses scheduled ticket times only (not estimates).
+     * - Regional hops (< ~3000 km): trust the printed local clock gap
+     *   (CGK 18:10 → SIN 20:55 = 2h 45m), never inflate to nonsense hours.
+     * - Long-haul: interpret wall clocks in each airport TZ so SIN→CDG
+     *   is ~13h, not the naive ~7h.
      */
     fun durationMinutes(
         flight: FlightEntity,
         departureAirport: Airport? = null,
         arrivalAirport: Airport? = null
     ): Long {
-        val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
-        val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
-        val fromMillis = ((arr - dep) / 60_000L).coerceAtLeast(0)
-        // Prefer stored duration only when it matches the instant difference.
+        val dep = flight.departureTimeMillis
+        val arr = flight.arrivalTimeMillis
+        val raw = ((arr - dep) / 60_000L).coerceAtLeast(0)
         val stored = flight.durationMinutes?.takeIf { it > 0 }?.toLong()
-        return if (stored != null && abs(stored - fromMillis) <= 15) stored else fromMillis
+        if (stored != null && abs(stored - raw) <= 15) return stored
+
+        val distance = flight.distanceKm ?: haversineKm(
+            departureAirport?.latitude,
+            departureAirport?.longitude,
+            arrivalAirport?.latitude,
+            arrivalAirport?.longitude
+        )
+        val depZone = departureAirport?.timeZoneId
+        val arrZone = arrivalAirport?.timeZoneId
+        // Short / regional: printed schedule gap is what the ticket shows.
+        if (distance == null || distance < 3_000.0 ||
+            depZone.isNullOrBlank() || arrZone.isNullOrBlank()
+        ) {
+            return raw
+        }
+
+        val normalized = normalize(
+            departureMillis = dep,
+            arrivalMillis = arr,
+            departureTimeZoneId = depZone,
+            arrivalTimeZoneId = arrZone,
+            distanceKm = distance
+        ).durationMinutes
+        // Safety: never replace a sensible regional-looking raw with a huge jump.
+        if (normalized > raw + 10 * 60 && distance < 6_000.0) return raw
+        if (stored != null && abs(stored - normalized) <= 20) return stored
+        return normalized
     }
 
     fun durationMinutes(
@@ -49,7 +82,6 @@ object FlightScheduleTimes {
         distanceKm: Double? = null,
         storedDurationMinutes: Int? = null
     ): Long {
-        // Used at save/import: build timezone-correct instants first via [normalize], then duration.
         val normalized = normalize(
             departureMillis = departureMillis,
             arrivalMillis = arrivalMillis,
@@ -66,6 +98,7 @@ object FlightScheduleTimes {
 
     /**
      * Re-interpret stored millis as airport-local schedules when needed.
+     * For display/duration only — do not write results back into Room from UI.
      */
     fun normalize(
         departureMillis: Long,
@@ -91,8 +124,7 @@ object FlightScheduleTimes {
             reinterpret(departureMillis, arrivalMillis, sourceZone, depZone, arrZone)
         }.distinctBy { it.durationMinutes }
 
-        val best = selectBest(candidates, rawMinutes, expected)
-        return best
+        return selectBest(candidates, rawMinutes, expected)
     }
 
     /**
@@ -105,14 +137,10 @@ object FlightScheduleTimes {
         airportTimeZoneId: String?
     ): Long {
         val zone = parseZone(airportTimeZoneId) ?: ZoneId.systemDefault()
-        // Date pickers usually encode the chosen calendar day at UTC midnight.
         val date = Instant.ofEpochMilli(dateMillis).atZone(ZoneOffset.UTC).toLocalDate()
         return date.atTime(hour, minute).atZone(zone).toInstant().toEpochMilli()
     }
 
-    /**
-     * Take millis that were built in [sourceZone] wall time and rebuild in [airportZone].
-     */
     fun reinterpretMillisAsAirportLocal(
         millis: Long,
         sourceZone: ZoneId = ZoneId.systemDefault(),
@@ -134,7 +162,6 @@ object FlightScheduleTimes {
         var arrLocal = Instant.ofEpochMilli(arrivalMillis).atZone(sourceZone).toLocalDateTime()
         var depInstant = depLocal.atZone(depZone).toInstant()
         var arrInstant = arrLocal.atZone(arrZone).toInstant()
-        // Overnight arrival printed on next local morning in destination TZ.
         var guard = 0
         while (!arrInstant.isAfter(depInstant) && guard < 2) {
             arrLocal = arrLocal.plusDays(1)
@@ -160,13 +187,10 @@ object FlightScheduleTimes {
         if (expectedMinutes != null) {
             return candidates.minBy { abs(it.durationMinutes - expectedMinutes) }
         }
-        // When zones differ and we have no distance, prefer the candidate that
-        // is not the naive under-count if a longer plausible one exists.
         val plausible = candidates.filter { it.durationMinutes in 20..(22 * 60) }
         if (plausible.isEmpty()) return candidates.first()
         val raw = plausible.firstOrNull { it.durationMinutes == rawMinutes }
         if (raw != null && plausible.size == 1) return raw
-        // Prefer longer among plausible when raw is the shortest (classic TZ bug).
         val shortest = plausible.minOf { it.durationMinutes }
         return if (rawMinutes == shortest && plausible.any { it.durationMinutes > rawMinutes + 90 }) {
             plausible.maxBy { it.durationMinutes }
@@ -177,7 +201,6 @@ object FlightScheduleTimes {
 
     private fun expectedMinutes(distanceKm: Double?): Long? {
         if (distanceKm == null || distanceKm < 200) return null
-        // Typical jet block time ≈ distance/850 km/h + 40 min taxi/climb buffer.
         return ((distanceKm / 850.0) * 60.0 + 40.0).toLong().coerceIn(45, 20 * 60)
     }
 
