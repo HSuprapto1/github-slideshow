@@ -13,11 +13,14 @@ import com.roamatlas.data.local.entity.TransportMode
 import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.data.local.entity.TripEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.File
+import java.io.FileInputStream
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -975,11 +978,13 @@ class JourneyRepository @Inject constructor(
         }
     }
 
-    suspend fun addJourneyPhoto(journeyId: Long, uri: Uri): Boolean {
-        val journey = tripDao.getById(journeyId) ?: return false
-        val stored = persistPhoto(uri, "journey_${journeyId}") ?: return false
+    suspend fun addJourneyPhoto(journeyId: Long, uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        val journey = tripDao.getById(journeyId) ?: return@withContext false
         val photos = decodePhotoUris(journey.photoUrisJson).toMutableList()
-        if (stored in photos) return true
+        // Already linked (same URI string) — treat as success.
+        if (uri.toString() in photos) return@withContext true
+        val stored = persistPhoto(uri, "journey_${journeyId}") ?: return@withContext false
+        if (stored in photos) return@withContext true
         photos.add(stored)
         tripDao.update(
             journey.copy(
@@ -988,7 +993,7 @@ class JourneyRepository @Inject constructor(
                 updatedAtMillis = System.currentTimeMillis()
             )
         )
-        return true
+        true
     }
 
     suspend fun removeJourneyPhoto(journeyId: Long, photoUri: String) {
@@ -1094,6 +1099,7 @@ class JourneyRepository @Inject constructor(
 
     private fun persistPhoto(uri: Uri, prefix: String): String? = runCatching {
         if (uri.scheme == "content") {
+            // Best-effort; MediaStore often refuses persistable grants — copy still works.
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
@@ -1104,15 +1110,44 @@ class JourneyRepository @Inject constructor(
         val dir = File(context.filesDir, "journey_photos").apply { mkdirs() }
         val extension = resolveExtension(uri)
         val out = File(dir, "${prefix}_${System.currentTimeMillis()}.$extension")
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        openPhotoInputStream(uri)?.use { input ->
             out.outputStream().use { output -> input.copyTo(output) }
         } ?: return null
+        if (!out.exists() || out.length() == 0L) {
+            out.delete()
+            return null
+        }
         Uri.fromFile(out).toString()
     }.getOrNull()
 
+    private fun openPhotoInputStream(uri: Uri): java.io.InputStream? {
+        when (uri.scheme?.lowercase(Locale.US)) {
+            "content" -> context.contentResolver.openInputStream(uri)?.let { return it }
+            "file" -> {
+                val path = uri.path
+                if (!path.isNullOrBlank()) {
+                    val file = File(path)
+                    if (file.isFile && file.canRead()) return FileInputStream(file)
+                }
+            }
+            null, "" -> {
+                val asFile = File(uri.toString())
+                if (asFile.isFile && asFile.canRead()) return FileInputStream(asFile)
+            }
+        }
+        // Fallbacks for odd stored strings.
+        context.contentResolver.openInputStream(uri)?.let { return it }
+        uri.path?.let { path ->
+            val file = File(path)
+            if (file.isFile && file.canRead()) return FileInputStream(file)
+        }
+        return null
+    }
+
     private fun resolveExtension(uri: Uri): String {
-        val mime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
-        val name = uri.lastPathSegment?.lowercase().orEmpty()
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            ?.lowercase().orEmpty()
+        val name = (uri.lastPathSegment ?: uri.path).orEmpty().lowercase()
         return when {
             mime.contains("pdf") || name.endsWith(".pdf") -> "pdf"
             mime.contains("png") || name.endsWith(".png") -> "png"

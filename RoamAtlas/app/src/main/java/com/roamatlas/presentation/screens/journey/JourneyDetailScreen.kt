@@ -179,8 +179,22 @@ fun JourneyDetailScreen(
                     ) { CircularProgressIndicator() }
                 }
             }
-            state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
-            state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
+            state.errorMessage?.let { msg ->
+                item {
+                    Text(msg, color = MaterialTheme.colorScheme.error)
+                    LaunchedEffect(msg) {
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            state.message?.let { msg ->
+                item {
+                    Text(msg, color = MaterialTheme.colorScheme.primary)
+                    LaunchedEffect(msg) {
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
             journey?.let { value ->
                 item { JourneyHeader(value, state.nowMillis) }
                 state.suggestedArrivalPlace?.let { placeName ->
@@ -330,6 +344,11 @@ fun JourneyDetailScreen(
                                 fullscreenIndex = index
                             },
                             onOpenDay = { day ->
+                                Toast.makeText(
+                                    context,
+                                    "Opening ${day.date} on Map…",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                                 onOpenMap(day.date, day.countryCode)
                             }
                         )
@@ -912,22 +931,25 @@ private fun JourneyTimelineSection(
                 color = MaterialTheme.colorScheme.primary
             )
             days.take(12).forEach { day ->
-                Text(
-                    buildString {
-                        append(
-                            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(day.date)
-                        )
-                        day.countryName?.let { append(" · ").append(it) }
-                            ?: day.countryCode?.let { append(" · ").append(it) }
-                        append(" · ${day.pointCount} points")
-                        if (day.photoCount > 0) append(" · ${day.photoCount} photos")
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenDay(day) }
-                        .padding(vertical = 6.dp)
-                )
+                OutlinedButton(
+                    onClick = { onOpenDay(day) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        buildString {
+                            append(
+                                DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+                                    .format(day.date)
+                            )
+                            day.countryName?.let { append(" · ").append(it) }
+                                ?: day.countryCode?.let { append(" · ").append(it) }
+                            append(" · ${day.pointCount} points")
+                            if (day.photoCount > 0) append(" · ${day.photoCount} photos")
+                            append(" · Map")
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
             if (days.size > 12) {
                 Text("+${days.size - 12} more days", style = MaterialTheme.typography.labelMedium)

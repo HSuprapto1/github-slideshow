@@ -41,11 +41,11 @@ sealed class Screen(
         const val DAY_COUNTRY_ROUTE = "map/day/{date}/{country}"
         const val DAY_CITY_ROUTE = "map/day/{date}/{country}/city/{city}"
         const val PHOTO_ROUTE = "map/photo/{locationId}"
-        fun forDate(date: String) = "map/day/$date"
+        fun forDate(date: String) = "map/day/${Uri.encode(date)}"
         fun forCountryDate(date: String, countryCode: String) =
-            "map/day/$date/${countryCode.uppercase()}"
+            "map/day/${Uri.encode(date)}/${Uri.encode(countryCode.uppercase())}"
         fun forCityDate(date: String, countryCode: String, city: String) =
-            "map/day/$date/${countryCode.uppercase()}/city/${Uri.encode(city)}"
+            "map/day/${Uri.encode(date)}/${Uri.encode(countryCode.uppercase())}/city/${Uri.encode(city)}"
         fun forPhoto(locationId: Long) = "map/photo/$locationId"
     }
 

@@ -128,24 +128,41 @@ class JourneyDetailViewModel @Inject constructor(
     fun importTimelinePhotosToAlbum() {
         val photos = _uiState.value.timelinePhotos
         if (photos.isEmpty()) {
-            _uiState.value = _uiState.value.copy(message = "No timeline photos in this journey’s dates.")
+            _uiState.value = _uiState.value.copy(
+                message = "No timeline photos in this journey’s dates."
+            )
             return
         }
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(message = "Adding timeline photos…")
+            val album = _uiState.value.journey?.photoUris.orEmpty().toSet()
             var added = 0
+            var skipped = 0
+            var failed = 0
             photos.forEach { location ->
                 val uriString = location.originalPhotoUri?.takeIf { it.isNotBlank() }
                     ?: location.photoUri?.takeIf { it.isNotBlank() }
-                if (uriString != null) {
-                    val ok = journeyRepository.addJourneyPhoto(journeyId, Uri.parse(uriString))
-                    if (ok) added++
+                if (uriString.isNullOrBlank()) {
+                    failed++
+                    return@forEach
                 }
+                if (uriString in album) {
+                    skipped++
+                    return@forEach
+                }
+                val ok = journeyRepository.addJourneyPhoto(journeyId, Uri.parse(uriString))
+                if (ok) added++ else failed++
             }
             _uiState.value = _uiState.value.copy(
-                message = if (added > 0) {
-                    "Added $added timeline photo${if (added == 1) "" else "s"} to the trip album."
-                } else {
-                    "No new timeline photos could be added."
+                message = when {
+                    added > 0 && failed == 0 ->
+                        "Added $added timeline photo${if (added == 1) "" else "s"} to the trip album."
+                    added > 0 ->
+                        "Added $added photo${if (added == 1) "" else "s"} · $failed could not be copied."
+                    skipped > 0 && failed == 0 ->
+                        "Those timeline photos are already in the trip album."
+                    else ->
+                        "Could not add timeline photos. Check photo access and try again."
                 }
             )
         }

@@ -168,26 +168,48 @@ fun RoamAtlasApp(
                         onOpenDays = { navController.navigate(Screen.Days.route) }
                     )
                 }
-                composable(Screen.Map.DAY_ROUTE) { entry ->
-                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                composable(
+                    route = Screen.Map.DAY_ROUTE,
+                    arguments = listOf(navArgument("date") { type = NavType.StringType })
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
                     MapScreenV2(
                         initialDate = date,
                         onOpenDays = { navController.navigate(Screen.Days.route) }
                     )
                 }
-                composable(Screen.Map.DAY_COUNTRY_ROUTE) { entry ->
-                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                composable(
+                    route = Screen.Map.DAY_COUNTRY_ROUTE,
+                    arguments = listOf(
+                        navArgument("date") { type = NavType.StringType },
+                        navArgument("country") { type = NavType.StringType }
+                    )
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
                     val country = entry.arguments?.getString("country")
+                        ?.let { android.net.Uri.decode(it) }
                     MapScreenV2(
                         initialDate = date,
                         initialCountryCode = country,
                         onOpenDays = { navController.navigate(Screen.Days.route) }
                     )
                 }
-                composable(Screen.Map.DAY_CITY_ROUTE) { entry ->
-                    val date = entry.arguments?.getString("date")?.let(LocalDate::parse)
+                composable(
+                    route = Screen.Map.DAY_CITY_ROUTE,
+                    arguments = listOf(
+                        navArgument("date") { type = NavType.StringType },
+                        navArgument("country") { type = NavType.StringType },
+                        navArgument("city") { type = NavType.StringType }
+                    )
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
                     val country = entry.arguments?.getString("country")
+                        ?.let { android.net.Uri.decode(it) }
                     val city = entry.arguments?.getString("city")
+                        ?.let { android.net.Uri.decode(it) }
                     MapScreenV2(
                         initialDate = date,
                         initialCountryCode = country,
@@ -195,7 +217,10 @@ fun RoamAtlasApp(
                         onOpenDays = { navController.navigate(Screen.Days.route) }
                     )
                 }
-                composable(Screen.Map.PHOTO_ROUTE) { entry ->
+                composable(
+                    route = Screen.Map.PHOTO_ROUTE,
+                    arguments = listOf(navArgument("locationId") { type = NavType.StringType })
+                ) { entry ->
                     val locationId = entry.arguments?.getString("locationId")?.toLongOrNull()
                     MapScreenV2(
                         initialLocationId = locationId,
@@ -334,12 +359,20 @@ fun RoamAtlasApp(
                     JourneyDetailScreen(
                         onNavigateBack = { navController.popBackStack() },
                         onOpenMap = { date, countryCode ->
-                            if (!countryCode.isNullOrBlank()) {
-                                navController.navigate(
-                                    Screen.Map.forCountryDate(date.toString(), countryCode)
-                                )
+                            // Only pass ISO country codes — longer/invalid values broke navigation
+                            // so the day tap looked like it did nothing.
+                            val code = countryCode?.trim()?.uppercase()
+                            val route = if (
+                                !code.isNullOrBlank() &&
+                                code.length in 2..3 &&
+                                code.all { it.isLetter() }
+                            ) {
+                                Screen.Map.forCountryDate(date.toString(), code)
                             } else {
-                                navController.navigate(Screen.Map.forDate(date.toString()))
+                                Screen.Map.forDate(date.toString())
+                            }
+                            runCatching {
+                                navController.navigate(route)
                             }
                         },
                         onAddToJourney = { journeyId, mode ->
