@@ -197,7 +197,12 @@ fun JourneyDetailScreen(
                         )
                     }
                 }
-                item { JourneyTravelSummaryCard(value) }
+                item {
+                    JourneyTravelSummaryCard(
+                        journey = value,
+                        airports = state.airports
+                    )
+                }
                 item {
                     JourneyStatusActions(
                         journey = value,
@@ -672,9 +677,24 @@ private fun PhotosSinceAirportCard(
 }
 
 @Composable
-private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
-    val summary = journey.travelSummary
-    if (journey.travelLegs.isEmpty()) return
+private fun JourneyTravelSummaryCard(
+    journey: JourneyWithFlights,
+    airports: Map<String, Airport>
+) {
+    val legs = journey.travelLegs
+    if (legs.isEmpty()) return
+    // Same math as the itinerary rows — never the old raw door-to-door shortcut.
+    val flightMinutes = legs.sumOf { flight ->
+        val dep = airports[flight.departureAirportCode]
+        val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+            ?: flight.arrivalAirportCode
+        val arr = airports[arrCode]
+        FlightScheduleTimes.durationMinutes(flight, dep, arr)
+    }
+    val transitMinutes = legs.zipWithNext().sumOf { (a, b) ->
+        ((b.departureTimeMillis - a.arrivalTimeMillis) / 60_000L).coerceAtLeast(0)
+    }
+    val totalMinutes = flightMinutes + transitMinutes
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -686,29 +706,23 @@ private fun JourneyTravelSummaryCard(journey: JourneyWithFlights) {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Split into air and ground after the last airport while the journey is still open.",
+                "Totals match the itinerary below (flight times + transit).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text("Overall", fontWeight = FontWeight.SemiBold)
-            summary.highlightLines
-                .filterNot { line ->
-                    summary.airHighlightLines.contains(line) ||
-                        summary.groundHighlightLines.contains(line)
-                }
-                .forEach { line ->
-                    Text(line, style = MaterialTheme.typography.bodyMedium)
-                }
-            Text("Air", fontWeight = FontWeight.SemiBold)
-            summary.airHighlightLines.forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodyMedium)
-            }
-            if (summary.groundHighlightLines.isNotEmpty()) {
-                Text("Ground / after airport", fontWeight = FontWeight.SemiBold)
-                summary.groundHighlightLines.forEach { line ->
-                    Text(line, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+            Text(
+                "Total trip time · ${formatDuration(totalMinutes)}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Flight time · ${formatDuration(flightMinutes)}",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                "Transit time · ${formatDuration(transitMinutes)}",
+                style = MaterialTheme.typography.bodyLarge
+            )
             if (journey.stillTravelingAfterBookedLegs) {
                 Text(
                     "Booked legs settled — journey still open for ground travel and photos.",

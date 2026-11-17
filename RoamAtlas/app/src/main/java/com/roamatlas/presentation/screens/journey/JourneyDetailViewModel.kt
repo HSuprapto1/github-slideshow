@@ -81,6 +81,8 @@ class JourneyDetailViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            // One-shot restore if an older build pushed SIN arrival to the next day (~17h).
+            runCatching { journeyRepository.repairCorruptedTicketSchedules(journeyId) }
             journeyRepository.getJourney(journeyId).collect { journey ->
                 val codes = journey?.flights.orEmpty().flatMap {
                     listOf(

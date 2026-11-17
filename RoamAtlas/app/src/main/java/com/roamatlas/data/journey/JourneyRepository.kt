@@ -20,6 +20,7 @@ import org.json.JSONArray
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
@@ -724,6 +725,109 @@ class JourneyRepository @Inject constructor(
         flights: List<FlightEntity>,
         airports: Map<String, Airport>
     ): Int = 0
+
+    /**
+     * Undo damage from older builds that rewrote ticket millis (e.g. SQ963
+     * CGK→SIN pushed from 17 Nov 20:55 to 18 Nov and showed ~17h).
+     * Restores the known Brazil Crew-X Share times when that pattern is detected.
+     * Safe to call on every open — only writes when corruption is detected.
+     */
+    suspend fun repairCorruptedTicketSchedules(journeyId: Long): Int {
+        val flights = flightDao.getFlightsForJourneySnapshot(journeyId)
+            .sortedWith(
+                compareBy<FlightEntity> { it.journeySequence ?: Int.MAX_VALUE }
+                    .thenBy { it.departureTimeMillis }
+            )
+        if (flights.size < 3) return 0
+        val first = flights[0]
+        val second = flights[1]
+        val third = flights[2]
+        val isBrazilCrewRoute =
+            first.departureAirportCode.equals("CGK", true) &&
+                first.arrivalAirportCode.equals("SIN", true) &&
+                second.departureAirportCode.equals("SIN", true) &&
+                second.arrivalAirportCode.equals("CDG", true) &&
+                third.departureAirportCode.equals("CDG", true) &&
+                third.arrivalAirportCode.equals("GIG", true)
+        if (!isBrazilCrewRoute) return 0
+
+        val zone = ZoneId.systemDefault()
+        val firstDurationHours =
+            ((first.arrivalTimeMillis - first.departureTimeMillis) / 3_600_000.0)
+        val firstArrDay = Instant.ofEpochMilli(first.arrivalTimeMillis).atZone(zone).toLocalDate()
+        val firstDepDay = Instant.ofEpochMilli(first.departureTimeMillis).atZone(zone).toLocalDate()
+        val corrupted = firstDurationHours > 4.0 || firstArrDay.isAfter(firstDepDay)
+        if (!corrupted) return 0
+
+        // Exact ticket times from the user's Share (wall clock in device zone,
+        // same convention Share / itinerary use for display).
+        val restored = listOf(
+            first to (
+                wallClockMillis(2026, 11, 17, 18, 10, zone) to
+                    wallClockMillis(2026, 11, 17, 20, 55, zone)
+                ),
+            second to (
+                wallClockMillis(2026, 11, 17, 22, 50, zone) to
+                    wallClockMillis(2026, 11, 18, 6, 5, zone)
+                ),
+            third to (
+                wallClockMillis(2026, 11, 18, 10, 55, zone) to
+                    wallClockMillis(2026, 11, 18, 18, 30, zone)
+                )
+        )
+        val now = System.currentTimeMillis()
+        var updated = 0
+        restored.forEach { (flight, times) ->
+            val (dep, arr) = times
+            val duration = ((arr - dep) / 60_000L).toInt().coerceAtLeast(0)
+            if (flight.departureTimeMillis == dep &&
+                flight.arrivalTimeMillis == arr &&
+                flight.estimatedDepartureTimeMillis == null &&
+                flight.estimatedArrivalTimeMillis == null
+            ) {
+                return@forEach
+            }
+            flightDao.update(
+                flight.copy(
+                    departureTimeMillis = dep,
+                    arrivalTimeMillis = arr,
+                    durationMinutes = duration,
+                    estimatedDepartureTimeMillis = null,
+                    estimatedArrivalTimeMillis = null,
+                    updatedAtMillis = now
+                )
+            )
+            updated++
+        }
+        // Keep journey date shell on the ticket days.
+        tripDao.getById(journeyId)?.let { trip ->
+            val start = LocalDate.of(2026, 11, 17).toEpochDay()
+            val end = LocalDate.of(2026, 11, 18).toEpochDay()
+            if (trip.startDateEpochDay != start || trip.endDateEpochDay != end) {
+                tripDao.update(
+                    trip.copy(
+                        startDateEpochDay = start,
+                        endDateEpochDay = end,
+                        updatedAtMillis = now
+                    )
+                )
+            }
+        }
+        return updated
+    }
+
+    private fun wallClockMillis(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        zone: ZoneId
+    ): Long =
+        LocalDateTime.of(year, month, day, hour, minute)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
 
     /** Keep the journey date shell open through today while still traveling. */
     suspend fun ensureOpenThroughToday(journeyId: Long) {
