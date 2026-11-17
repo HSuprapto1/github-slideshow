@@ -83,6 +83,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
@@ -176,7 +177,7 @@ fun JourneyDetailScreen(
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             journey?.let { value ->
-                item { JourneyHeader(value, state.nowMillis) }
+                item { JourneyHeader(value, state.nowMillis, state.airports) }
                 state.suggestedArrivalPlace?.let { placeName ->
                     item {
                         SuggestedArrivalPlaceCard(
@@ -502,7 +503,11 @@ fun JourneyDetailScreen(
 }
 
 @Composable
-private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
+private fun JourneyHeader(
+    journey: JourneyWithFlights,
+    now: Long,
+    airports: Map<String, Airport>
+) {
     val first = journey.firstDepartureMillis
     val final = journey.finalArrivalMillis
     val nextFlight = journey.orderedFlights.firstOrNull {
@@ -580,7 +585,12 @@ private fun JourneyHeader(journey: JourneyWithFlights, now: Long) {
                     val flightTimes = route
                         .filter { TransportMode.isFlight(it.transportMode) }
                         .joinToString(" · ") {
-                            "${it.departureAirportCode}→${it.arrivalAirportCode} ${formatDuration(legDurationMinutes(it))}"
+                            val mins = legDurationMinutes(
+                                it,
+                                airports[it.departureAirportCode],
+                                airports[it.arrivalAirportCode]
+                            )
+                            "${it.departureAirportCode}→${it.arrivalAirportCode} ${formatDuration(mins)}"
                         }
                     if (flightTimes.isNotBlank()) {
                         Text(
@@ -1271,7 +1281,9 @@ private fun FlightLegCard(
                         arrivalAirport
                     )
                 )
-                val durationLabel = formatDuration(legDurationMinutes(flight))
+                val durationLabel = formatDuration(
+                    legDurationMinutes(flight, departureAirport, arrivalAirport)
+                )
                 Text(
                     if (TransportMode.isFlight(flight.transportMode)) {
                         "Flight time · $durationLabel"
@@ -1880,12 +1892,11 @@ private fun ShareJourneyDialog(
     )
 }
 
-private fun legDurationMinutes(flight: FlightEntity): Long {
-    flight.durationMinutes?.takeIf { it > 0 }?.let { return it.toLong() }
-    val dep = flight.estimatedDepartureTimeMillis ?: flight.departureTimeMillis
-    val arr = flight.estimatedArrivalTimeMillis ?: flight.arrivalTimeMillis
-    return ((arr - dep) / 60_000L).coerceAtLeast(0)
-}
+private fun legDurationMinutes(
+    flight: FlightEntity,
+    departureAirport: Airport?,
+    arrivalAirport: Airport?
+): Long = FlightScheduleTimes.durationMinutes(flight, departureAirport, arrivalAirport)
 
 private fun formatAirportTime(millis: Long, airport: Airport?): String {
     val formatter = SimpleDateFormat("EEE, d MMM yyyy · HH:mm", Locale.getDefault())

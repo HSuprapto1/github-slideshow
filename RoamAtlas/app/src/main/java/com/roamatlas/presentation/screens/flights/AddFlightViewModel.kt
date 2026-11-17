@@ -326,20 +326,26 @@ class AddFlightViewModel @Inject constructor(
             _uiState.update { it.copy(isSaving = true) }
             
             try {
-                val departureTime = combineDateAndTime(
+                val departureTime = com.roamatlas.data.flight.FlightScheduleTimes.combineLocalDateAndTimeMillis(
                     state.departureDateMillis!!,
                     state.departureHour,
                     state.departureMinute,
                     selectedDepartureAirport?.timeZoneId
                 )
-                val arrivalTime = combineDateAndTime(
+                val arrivalTime = com.roamatlas.data.flight.FlightScheduleTimes.combineLocalDateAndTimeMillis(
                     state.arrivalDateMillis!!,
                     state.arrivalHour,
                     state.arrivalMinute,
                     selectedArrivalAirport?.timeZoneId
                 )
                 
-                val durationMinutes = ((arrivalTime - departureTime) / 60000).toInt()
+                val durationMinutes = com.roamatlas.data.flight.FlightScheduleTimes.durationMinutes(
+                    departureMillis = departureTime,
+                    arrivalMillis = arrivalTime,
+                    departureTimeZoneId = selectedDepartureAirport?.timeZoneId,
+                    arrivalTimeZoneId = selectedArrivalAirport?.timeZoneId,
+                    distanceKm = state.calculatedDistanceKm
+                ).toInt()
                 
                 val isHotel = TransportMode.isHotel(state.transportMode)
                 val arrivalCode = state.arrivalAirportCode.ifBlank {

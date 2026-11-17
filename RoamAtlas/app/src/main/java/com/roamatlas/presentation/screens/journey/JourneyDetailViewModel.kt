@@ -89,6 +89,11 @@ class JourneyDetailViewModel @Inject constructor(
                         it.actualArrivalAirportCode
                     )
                 }.filterNotNull()
+                val airports = airportRepository.getByIataCodes(codes)
+                if (journey != null) {
+                    // Repair long-haul durations stored without airport timezones.
+                    journeyRepository.normalizeFlightSchedules(journey.flights, airports)
+                }
                 val suggested = journey?.let {
                     if (!it.isCompleted && !it.isCancelled) {
                         journeyTravelDetector.suggestedArrivalPlace(journeyId)
@@ -98,7 +103,7 @@ class JourneyDetailViewModel @Inject constructor(
                 }
                 _uiState.value = _uiState.value.copy(
                     journey = journey,
-                    airports = airportRepository.getByIataCodes(codes),
+                    airports = airports,
                     suggestedArrivalPlace = suggested,
                     isLoading = false,
                     errorMessage = if (journey == null) "Journey not found." else null

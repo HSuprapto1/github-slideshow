@@ -3,6 +3,8 @@ package com.roamatlas.data.journey
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.dao.TripDao
 import com.roamatlas.data.local.entity.FlightEntity
@@ -22,6 +24,7 @@ import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 
 enum class ConnectionRisk {
     COMFORTABLE,
@@ -709,6 +712,56 @@ class JourneyRepository @Inject constructor(
             )
         }
         return id
+    }
+
+    /**
+     * Fix flight times that were stored without airport timezones
+     * (classic long-haul under-count, e.g. SIN→CDG showing ~7h).
+     */
+    suspend fun normalizeFlightSchedules(
+        flights: List<FlightEntity>,
+        airports: Map<String, Airport>
+    ): Int {
+        var updated = 0
+        flights.forEach { flight ->
+            if (TransportMode.isHotel(flight.transportMode)) return@forEach
+            val dep = airports[flight.departureAirportCode]
+            val arr = airports[
+                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+            ]
+            if (dep?.timeZoneId.isNullOrBlank() || arr?.timeZoneId.isNullOrBlank()) return@forEach
+            val distance = flight.distanceKm ?: FlightScheduleTimes.haversineKm(
+                dep?.latitude,
+                dep?.longitude,
+                arr?.latitude,
+                arr?.longitude
+            )
+            val schedule = FlightScheduleTimes.normalize(
+                departureMillis = flight.departureTimeMillis,
+                arrivalMillis = flight.arrivalTimeMillis,
+                departureTimeZoneId = dep?.timeZoneId,
+                arrivalTimeZoneId = arr?.timeZoneId,
+                distanceKm = distance
+            )
+            val durationChanged = flight.durationMinutes == null ||
+                abs((flight.durationMinutes ?: 0) - schedule.durationMinutes.toInt()) > 20
+            val timesChanged =
+                abs(flight.departureTimeMillis - schedule.departureMillis) > 60_000L ||
+                    abs(flight.arrivalTimeMillis - schedule.arrivalMillis) > 60_000L
+            if (!durationChanged && !timesChanged) return@forEach
+            flightDao.update(
+                flight.copy(
+                    departureTimeMillis = schedule.departureMillis,
+                    arrivalTimeMillis = schedule.arrivalMillis,
+                    durationMinutes = schedule.durationMinutes.toInt(),
+                    distanceKm = distance ?: flight.distanceKm,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+            updated++
+        }
+        return updated
     }
 
     /** Keep the journey date shell open through today while still traveling. */

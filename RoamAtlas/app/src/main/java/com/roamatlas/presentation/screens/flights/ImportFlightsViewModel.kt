@@ -4,8 +4,10 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.email.GmailFlightImporter
 import com.roamatlas.data.email.ParsedItinerary
+import com.roamatlas.data.flight.FlightScheduleTimes
 import com.roamatlas.data.journey.JourneyRepository
 import com.roamatlas.data.local.dao.FlightDao
 import com.roamatlas.data.local.entity.FlightEntity
@@ -35,7 +37,8 @@ data class ImportFlightsUiState(
 class ImportFlightsViewModel @Inject constructor(
     private val gmailFlightImporter: GmailFlightImporter,
     private val flightDao: FlightDao,
-    private val journeyRepository: JourneyRepository
+    private val journeyRepository: JourneyRepository,
+    private val airportRepository: AirportRepository
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(ImportFlightsUiState())
@@ -243,30 +246,46 @@ class ImportFlightsViewModel @Inject constructor(
                             continue
                         }
 
-                        val depTime = flight.departureTimeMillis
-                        if (depTime == null) {
+                        val depTimeRaw = flight.departureTimeMillis
+                        if (depTimeRaw == null) {
                             skippedCount++
                             continue
                         }
-                        val arrTime = flight.arrivalTimeMillis ?: depTime
+                        val arrTimeRaw = flight.arrivalTimeMillis ?: depTimeRaw
+                        val depAirport = airportRepository.findByCode(flight.departureAirportCode)
+                        val arrAirport = airportRepository.findByCode(flight.arrivalAirportCode)
+                        val distanceKm = FlightScheduleTimes.haversineKm(
+                            depAirport?.latitude,
+                            depAirport?.longitude,
+                            arrAirport?.latitude,
+                            arrAirport?.longitude
+                        )
+                        // Email parser builds times in the phone zone; rebuild as airport-local.
+                        val schedule = FlightScheduleTimes.normalize(
+                            departureMillis = depTimeRaw,
+                            arrivalMillis = arrTimeRaw,
+                            departureTimeZoneId = depAirport?.timeZoneId,
+                            arrivalTimeZoneId = arrAirport?.timeZoneId,
+                            distanceKm = distanceKm
+                        )
                         
                         val flightEntity = FlightEntity(
                             id = 0, // Auto-generated
                             departureAirportCode = flight.departureAirportCode,
-                            departureAirportName = null,
-                            departureCity = null,
-                            departureCountryCode = null,
+                            departureAirportName = depAirport?.name,
+                            departureCity = depAirport?.city,
+                            departureCountryCode = depAirport?.countryCode,
                             arrivalAirportCode = flight.arrivalAirportCode,
-                            arrivalAirportName = null,
-                            arrivalCity = null,
-                            arrivalCountryCode = null,
-                            departureTimeMillis = depTime,
-                            arrivalTimeMillis = arrTime,
+                            arrivalAirportName = arrAirport?.name,
+                            arrivalCity = arrAirport?.city,
+                            arrivalCountryCode = arrAirport?.countryCode,
+                            departureTimeMillis = schedule.departureMillis,
+                            arrivalTimeMillis = schedule.arrivalMillis,
                             flightNumber = flight.flightNumber,
                             airline = flight.airline ?: itinerary.airline,
                             aircraftType = flight.aircraftType,
-                            distanceKm = null,
-                            durationMinutes = null,
+                            distanceKm = distanceKm,
+                            durationMinutes = schedule.durationMinutes.toInt().takeIf { it > 0 },
                             seatNumber = flight.seatNumber,
                             bookingReference = flight.bookingReference ?: itinerary.bookingReference,
                             notes = mergeEmailDetails(
