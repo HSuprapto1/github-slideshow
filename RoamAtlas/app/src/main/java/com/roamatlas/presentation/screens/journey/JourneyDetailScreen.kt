@@ -77,6 +77,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
@@ -373,7 +374,10 @@ fun JourneyDetailScreen(
                         airports = state.airports,
                         gpsTrack = state.gpsTrack,
                         showGpsTrack = state.showGpsTrack,
-                        onToggleGpsTrack = viewModel::setShowGpsTrack
+                        currentLatitude = state.currentLatitude,
+                        currentLongitude = state.currentLongitude,
+                        onToggleGpsTrack = viewModel::setShowGpsTrack,
+                        onRefreshGps = viewModel::refreshCurrentGps
                     )
                 }
                 item { Spacer(Modifier.height(50.dp)) }
@@ -986,7 +990,10 @@ private fun JourneyRouteMap(
     airports: Map<String, Airport>,
     gpsTrack: List<LocationRecord>,
     showGpsTrack: Boolean,
-    onToggleGpsTrack: (Boolean) -> Unit
+    currentLatitude: Double?,
+    currentLongitude: Double?,
+    onToggleGpsTrack: (Boolean) -> Unit,
+    onRefreshGps: () -> Unit
 ) {
     val transportFlights = journey.orderedFlights.filterNot {
         TransportMode.isHotel(it.transportMode)
@@ -994,11 +1001,19 @@ private fun JourneyRouteMap(
     val airportPoints = transportFlights.flatMap { flight ->
         listOfNotNull(
             airports[flight.departureAirportCode]?.let { LatLng(it.latitude, it.longitude) },
-            airports[flight.arrivalAirportCode]?.let { LatLng(it.latitude, it.longitude) }
+            airports[
+                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+            ]?.let { LatLng(it.latitude, it.longitude) }
         )
     }.distinct()
     val gpsPoints = gpsTrack.map { LatLng(it.latitude, it.longitude) }
-    val focus = gpsPoints.firstOrNull() ?: airportPoints.firstOrNull()
+    val currentGps = if (currentLatitude != null && currentLongitude != null) {
+        LatLng(currentLatitude, currentLongitude)
+    } else {
+        null
+    }
+    val focus = currentGps ?: gpsPoints.lastOrNull() ?: airportPoints.firstOrNull()
     if (focus == null) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -1011,29 +1026,43 @@ private fun JourneyRouteMap(
     val cameraState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
             focus,
-            if (gpsPoints.isNotEmpty()) 5f else 2.5f
+            when {
+                currentGps != null -> 12f
+                gpsPoints.isNotEmpty() -> 5f
+                else -> 2.5f
+            }
         )
     }
-    Column {
+    LaunchedEffect(currentLatitude, currentLongitude) {
+        val here = currentGps ?: return@LaunchedEffect
+        cameraState.animate(CameraUpdateFactory.newLatLngZoom(here, 12f))
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Journey route", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            "Blue = airport flight legs. Teal = GPS path during this journey (when available).",
+            "Green = arrived legs · Blue = remaining · Teal = GPS path · Pin = you now.",
             style = MaterialTheme.typography.bodySmall
         )
-        if (gpsPoints.isNotEmpty()) {
-            FilterChip(
-                selected = showGpsTrack,
-                onClick = { onToggleGpsTrack(!showGpsTrack) },
-                label = {
-                    Text(
-                        if (showGpsTrack) "GPS path on (${gpsPoints.size} pts)"
-                        else "GPS path off"
-                    )
-                }
-            )
-        } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (gpsPoints.isNotEmpty()) {
+                FilterChip(
+                    selected = showGpsTrack,
+                    onClick = { onToggleGpsTrack(!showGpsTrack) },
+                    label = {
+                        Text(
+                            if (showGpsTrack) "GPS path on (${gpsPoints.size} pts)"
+                            else "GPS path off"
+                        )
+                    }
+                )
+            }
+            OutlinedButton(onClick = onRefreshGps) {
+                Text(if (currentGps != null) "Center on me" else "Find my GPS")
+            }
+        }
+        if (currentGps == null) {
             Text(
-                "No GPS points found for this journey’s dates yet.",
+                "Waiting for current GPS… grant location permission if needed.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1045,7 +1074,8 @@ private fun JourneyRouteMap(
             airports.values.filter { airport ->
                 transportFlights.any {
                     it.departureAirportCode == airport.iataCode ||
-                        it.arrivalAirportCode == airport.iataCode
+                        it.arrivalAirportCode == airport.iataCode ||
+                        it.actualArrivalAirportCode == airport.iataCode
                 }
             }.forEach { airport ->
                 Marker(
@@ -1054,17 +1084,28 @@ private fun JourneyRouteMap(
                     snippet = airport.city
                 )
             }
+            currentGps?.let { here ->
+                Marker(
+                    state = MarkerState(here),
+                    title = "You are here",
+                    snippet = "Current GPS"
+                )
+            }
             transportFlights.forEach { flight ->
                 val departure = airports[flight.departureAirportCode]
-                val arrival = airports[flight.arrivalAirportCode]
+                val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+                val arrival = airports[arrCode]
                 if (departure != null && arrival != null) {
+                    val arrived = TravelLegStatus.normalize(flight.travelLegStatus) ==
+                        TravelLegStatus.ARRIVED
                     Polyline(
                         points = listOf(
                             LatLng(departure.latitude, departure.longitude),
                             LatLng(arrival.latitude, arrival.longitude)
                         ),
-                        color = MaterialTheme.colorScheme.primary,
-                        width = 7f,
+                        color = if (arrived) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
+                        width = if (arrived) 8f else 7f,
                         geodesic = true
                     )
                 }
@@ -1118,44 +1159,96 @@ private fun SimpleJourneyItinerary(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             legs.forEachIndexed { index, flight ->
-                val depAirport = airports[flight.departureAirportCode]
                 val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
                     ?: flight.arrivalAirportCode
-                val arrAirport = airports[arrCode]
                 val depMillis = flight.departureTimeMillis
                 val arrMillis = flight.arrivalTimeMillis
                 val duration = flyMinutes[index]
+                val status = TravelLegStatus.normalize(flight.travelLegStatus)
+                val arrived = status == TravelLegStatus.ARRIVED
+                val legContainer = when (status) {
+                    TravelLegStatus.ARRIVED -> Color(0xFFE8F5E9)
+                    TravelLegStatus.DELAYED -> Color(0xFFFFF3E0)
+                    TravelLegStatus.MISSED, TravelLegStatus.SKIPPED -> Color(0xFFFFEBEE)
+                    TravelLegStatus.DIVERTED -> Color(0xFFFFF8E1)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+                val legAccent = when (status) {
+                    TravelLegStatus.ARRIVED -> Color(0xFF1B5E20)
+                    TravelLegStatus.DELAYED -> Color(0xFFE65100)
+                    TravelLegStatus.MISSED, TravelLegStatus.SKIPPED -> Color(0xFFB71C1C)
+                    TravelLegStatus.DIVERTED -> Color(0xFFF57F17)
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
 
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        buildString {
-                            append("${index + 1}. ")
-                            append(
-                                listOfNotNull(flight.airline, flight.flightNumber)
-                                    .joinToString(" · ")
-                                    .ifBlank { TransportMode.label(flight.transportMode) }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = legContainer,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                buildString {
+                                    append("${index + 1}. ")
+                                    append(
+                                        listOfNotNull(flight.airline, flight.flightNumber)
+                                            .joinToString(" · ")
+                                            .ifBlank { TransportMode.label(flight.transportMode) }
+                                    )
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = legAccent
                             )
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "${flight.departureAirportCode} → $arrCode",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "${formatTicketStamp(depMillis)}  →  ${formatTicketStamp(arrMillis)}",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        "Fly time · ${formatDuration(duration)}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { onEditLeg(flight) }) { Text("Edit") }
-                        TextButton(onClick = { onRemoveLeg(flight) }) { Text("Remove") }
+                            if (status != TravelLegStatus.PLANNED) {
+                                AssistChip(
+                                    onClick = {},
+                                    enabled = false,
+                                    label = {
+                                        Text(
+                                            TravelLegStatus.label(status),
+                                            color = legAccent
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                        Text(
+                            "${flight.departureAirportCode} → $arrCode",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = legAccent
+                        )
+                        Text(
+                            "${formatTicketStamp(depMillis)}  →  ${formatTicketStamp(arrMillis)}",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            "Fly time · ${formatDuration(duration)}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = legAccent
+                        )
+                        if (arrived) {
+                            Text(
+                                "Completed",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { onEditLeg(flight) }) { Text("Edit") }
+                            TextButton(onClick = { onRemoveLeg(flight) }) { Text("Remove") }
+                        }
                     }
                 }
 
@@ -1240,7 +1333,16 @@ private fun FlightLegActionsCard(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) launchCamera() }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val status = TravelLegStatus.normalize(flight.travelLegStatus)
+    val arrived = status == TravelLegStatus.ARRIVED
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = if (arrived) {
+            CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+        } else {
+            CardDefaults.cardColors()
+        }
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1252,7 +1354,8 @@ private fun FlightLegActionsCard(
             ) {
                 Text(
                     "${flight.departureAirportCode} → ${flight.arrivalAirportCode}",
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (arrived) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onSurface
                 )
                 Row {
                     TextButton(onClick = onEdit) { Text("Edit") }
@@ -1262,7 +1365,12 @@ private fun FlightLegActionsCard(
             AssistChip(
                 onClick = {},
                 enabled = false,
-                label = { Text(TravelLegStatus.label(flight.travelLegStatus)) }
+                label = {
+                    Text(
+                        TravelLegStatus.label(status),
+                        color = if (arrived) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurface
+                    )
+                }
             )
             TextButton(onClick = onEditOps) { Text("Delays, seat & status") }
             TravelLegActionsRow(

@@ -1,9 +1,17 @@
 package com.roamatlas.presentation.screens.journey
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.roamatlas.data.airport.Airport
 import com.roamatlas.data.airport.AirportRepository
 import com.roamatlas.data.flight.FlightScheduleTimes
@@ -16,6 +24,7 @@ import com.roamatlas.data.local.entity.TravelLegStatus
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -46,6 +56,9 @@ data class JourneyDetailUiState(
     val journeyDays: List<JourneyDaySummary> = emptyList(),
     val trackedDayCount: Int = 0,
     val showGpsTrack: Boolean = true,
+    /** Live / last-known device GPS for centering the journey map. */
+    val currentLatitude: Double? = null,
+    val currentLongitude: Double? = null,
     val nowMillis: Long = System.currentTimeMillis(),
     val isLoading: Boolean = true,
     val wasDeleted: Boolean = false,
@@ -55,6 +68,7 @@ data class JourneyDetailUiState(
 
 @HiltViewModel
 class JourneyDetailViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
     private val journeyRepository: JourneyRepository,
     private val airportRepository: AirportRepository,
@@ -80,6 +94,9 @@ class JourneyDetailViewModel @Inject constructor(
                     )
                 }
             }
+        }
+        viewModelScope.launch {
+            refreshCurrentGps()
         }
         viewModelScope.launch {
             // One-shot restore if an older build pushed SIN arrival to the next day (~17h).
@@ -117,12 +134,59 @@ class JourneyDetailViewModel @Inject constructor(
             while (true) {
                 delay(60_000)
                 _uiState.value = _uiState.value.copy(nowMillis = System.currentTimeMillis())
+                refreshCurrentGps()
             }
         }
     }
 
     fun setShowGpsTrack(show: Boolean) {
         _uiState.value = _uiState.value.copy(showGpsTrack = show)
+    }
+
+    fun refreshCurrentGps() {
+        viewModelScope.launch {
+            val device = readDeviceLocation()
+            if (device != null) {
+                _uiState.value = _uiState.value.copy(
+                    currentLatitude = device.latitude,
+                    currentLongitude = device.longitude
+                )
+                return@launch
+            }
+            // Fallback: latest point already stored by GPS tracking.
+            locationDao.getLatestLocation()?.let { latest ->
+                _uiState.value = _uiState.value.copy(
+                    currentLatitude = latest.latitude,
+                    currentLongitude = latest.longitude
+                )
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun readDeviceLocation(): android.location.Location? {
+        val fine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) return null
+        return runCatching {
+            val client = LocationServices.getFusedLocationProviderClient(context)
+            val cancellation = CancellationTokenSource()
+            val current = try {
+                client.getCurrentLocation(
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    cancellation.token
+                ).await()
+            } catch (_: Exception) {
+                null
+            }
+            current ?: client.lastLocation.await()
+        }.getOrNull()
     }
 
     fun importTimelinePhotosToAlbum() {
