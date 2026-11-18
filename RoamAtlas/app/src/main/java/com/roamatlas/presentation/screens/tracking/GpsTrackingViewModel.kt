@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.roamatlas.data.location.LocationTracker
 import com.roamatlas.data.location.LocationTrackingService
 import com.roamatlas.data.location.TrackingMode
+import com.roamatlas.data.location.TrackingPreferences
 import com.roamatlas.data.location.TrackingState
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,6 +30,7 @@ data class GpsTrackingUiState(
     val hasLocationPermission: Boolean = false,
     val hasBackgroundPermission: Boolean = false,
     val hasNotificationPermission: Boolean = true,
+    val allPermissionsGranted: Boolean = false,
     val totalLocationsRecorded: Int = 0,
     val showModeSelector: Boolean = false
 )
@@ -37,36 +39,53 @@ data class GpsTrackingUiState(
 class GpsTrackingViewModel @Inject constructor(
     private val locationTracker: LocationTracker,
     private val locationRepository: LocationRepository,
+    private val trackingPreferences: TrackingPreferences,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
     
-    private val _selectedMode = MutableStateFlow(TrackingMode.SMART)
+    private val _selectedMode = MutableStateFlow(trackingPreferences.mode)
     private val _showModeSelector = MutableStateFlow(false)
     private val _totalLocations = MutableStateFlow(0)
+    /** Bumped so permission checks re-run even when other flows are unchanged. */
+    private val _permissionRevision = MutableStateFlow(0)
     
     val uiState: StateFlow<GpsTrackingUiState> = combine(
         locationTracker.trackingState,
         _selectedMode,
         _showModeSelector,
-        _totalLocations
-    ) { trackingState, selectedMode, showModeSelector, totalLocations ->
+        _totalLocations,
+        _permissionRevision
+    ) { trackingState, selectedMode, showModeSelector, totalLocations, _ ->
+        val hasLocation = checkLocationPermission()
+        val hasBackground = checkBackgroundPermission()
+        val hasNotification = checkNotificationPermission()
         GpsTrackingUiState(
             trackingState = trackingState,
             selectedMode = selectedMode,
-            hasLocationPermission = checkLocationPermission(),
-            hasBackgroundPermission = checkBackgroundPermission(),
-            hasNotificationPermission = checkNotificationPermission(),
+            hasLocationPermission = hasLocation,
+            hasBackgroundPermission = hasBackground,
+            hasNotificationPermission = hasNotification,
+            allPermissionsGranted = hasLocation && hasBackground && hasNotification,
             totalLocationsRecorded = totalLocations,
             showModeSelector = showModeSelector
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = GpsTrackingUiState()
+        initialValue = GpsTrackingUiState(
+            hasLocationPermission = checkLocationPermission(),
+            hasBackgroundPermission = checkBackgroundPermission(),
+            hasNotificationPermission = checkNotificationPermission(),
+            allPermissionsGranted = checkLocationPermission() &&
+                checkBackgroundPermission() &&
+                checkNotificationPermission(),
+            selectedMode = trackingPreferences.mode
+        )
     )
     
     init {
         loadTotalLocations()
+        refreshPermissions()
     }
     
     private fun loadTotalLocations() {
@@ -95,6 +114,7 @@ class GpsTrackingViewModel @Inject constructor(
     
     fun selectMode(mode: TrackingMode) {
         _selectedMode.value = mode
+        trackingPreferences.mode = mode
         _showModeSelector.value = false
         
         if (locationTracker.trackingState.value.isTracking) {
@@ -112,9 +132,7 @@ class GpsTrackingViewModel @Inject constructor(
     }
     
     fun refreshPermissions() {
-        viewModelScope.launch {
-            _selectedMode.value = _selectedMode.value
-        }
+        _permissionRevision.value = _permissionRevision.value + 1
     }
     
     private fun checkLocationPermission(): Boolean {

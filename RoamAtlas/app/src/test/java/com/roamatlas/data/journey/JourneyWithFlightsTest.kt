@@ -1,0 +1,194 @@
+package com.roamatlas.data.journey
+
+import com.roamatlas.data.local.entity.FlightEntity
+import com.roamatlas.data.local.entity.TripEntity
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class JourneyWithFlightsTest {
+    @Test
+    fun `legs sort by departure time even when sequence is out of order`() {
+        val later = flight(
+            id = 1,
+            departure = "SIN",
+            arrival = "CDG",
+            departureTime = 10_000_000,
+            arrivalTime = 20_000_000
+        ).copy(journeySequence = 0)
+        val earlier = flight(
+            id = 2,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_000_000
+        ).copy(journeySequence = 1)
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "Out of order add",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "FR",
+                destinationCity = "Paris",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(later, earlier)
+        )
+        assertEquals(listOf(2L, 1L), journey.orderedFlights.map { it.id })
+        assertEquals("CGK", journey.orderedFlights.first().departureAirportCode)
+    }
+
+    @Test
+    fun `arrival delay reduces connection and triggers warning`() {
+        val first = flight(
+            id = 1,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_600_000
+        ).copy(estimatedArrivalTimeMillis = 8_200_000)
+        val second = flight(
+            id = 2,
+            departure = "SIN",
+            arrival = "HND",
+            departureTime = 11_800_000,
+            arrivalTime = 25_000_000
+        ).copy(minimumConnectionMinutes = 90)
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "Test journey",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "JP",
+                destinationCity = "Tokyo",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(first, second)
+        )
+
+        val connection = journey.connections.single()
+        assertEquals(120, connection.scheduledMinutes)
+        assertEquals(60, connection.effectiveMinutes)
+        assertEquals(ConnectionRisk.BELOW_RECOMMENDED, connection.risk)
+    }
+
+    @Test
+    fun `travel summary uses actual times when present`() {
+        val first = flight(
+            id = 1,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_600_000
+        ).copy(
+            travelLegStatus = "ARRIVED",
+            actualDepartureMillis = 1_200_000,
+            actualArrivalMillis = 5_000_000
+        )
+        val second = flight(
+            id = 2,
+            departure = "SIN",
+            arrival = "HND",
+            departureTime = 11_800_000,
+            arrivalTime = 25_000_000
+        ).copy(
+            travelLegStatus = "ARRIVED",
+            actualDepartureMillis = 12_000_000,
+            actualArrivalMillis = 26_000_000
+        )
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "Test journey",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "JP",
+                destinationCity = "Tokyo",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(first, second)
+        )
+        val summary = journey.travelSummary
+        assertEquals(2, summary.legsArrived)
+        assertEquals(((26_000_000L - 1_200_000L) / 60_000L), summary.actualDoorToDoorMinutes)
+        assertEquals(true, summary.highlightLines.any { it.contains("Actual door-to-door") })
+    }
+
+    @Test
+    fun `booked legs settled keeps journey still traveling until completed`() {
+        val first = flight(
+            id = 1,
+            departure = "CGK",
+            arrival = "SIN",
+            departureTime = 1_000_000,
+            arrivalTime = 4_600_000
+        ).copy(travelLegStatus = "ARRIVED", actualArrivalMillis = 5_000_000)
+        val journey = JourneyWithFlights(
+            journey = TripEntity(
+                id = 1,
+                name = "To warehouse",
+                startDateEpochDay = 0,
+                endDateEpochDay = 1,
+                destinationCountryCode = "SG",
+                destinationCity = "Singapore",
+                notes = null,
+                coverPhotoUri = null,
+                photoUrisJson = null,
+                journeyStatus = "IN_PROGRESS",
+                createdAtMillis = 0,
+                updatedAtMillis = 0
+            ),
+            flights = listOf(first)
+        )
+        assertEquals(true, journey.bookedLegsSettled)
+        assertEquals(true, journey.stillTravelingAfterBookedLegs)
+        assertEquals("SIN", journey.lastSettledArrivalLabel)
+        assertEquals(true, journey.travelSummary.airHighlightLines.isNotEmpty())
+        assertEquals(true, journey.travelSummary.groundHighlightLines.isNotEmpty())
+    }
+
+    private fun flight(
+        id: Long,
+        departure: String,
+        arrival: String,
+        departureTime: Long,
+        arrivalTime: Long
+    ) = FlightEntity(
+        id = id,
+        departureAirportCode = departure,
+        departureAirportName = null,
+        departureCity = null,
+        departureCountryCode = null,
+        arrivalAirportCode = arrival,
+        arrivalAirportName = null,
+        arrivalCity = null,
+        arrivalCountryCode = null,
+        departureTimeMillis = departureTime,
+        arrivalTimeMillis = arrivalTime,
+        flightNumber = null,
+        airline = null,
+        aircraftType = null,
+        distanceKm = null,
+        durationMinutes = null,
+        seatNumber = null,
+        bookingReference = null,
+        notes = null,
+        photoUri = null,
+        source = "TEST",
+        createdAtMillis = 0,
+        updatedAtMillis = 0
+    )
+}

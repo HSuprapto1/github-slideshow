@@ -30,6 +30,10 @@ data class LocationEntity(
     val confidence: String,
     val originalSourceId: String?,
     val notes: String?,
+    val photoUri: String? = null,
+    val originalPhotoUri: String? = null,
+    /** True when GPS looks airborne — kept for flight path, excluded from country visits. */
+    val isAirborne: Boolean = false,
     val createdAtMillis: Long,
     val updatedAtMillis: Long
 )

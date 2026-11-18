@@ -9,6 +9,7 @@ Personal travel history, world map, GPS location tracker, and country day-counti
 - **GPS Tracking** - Battery-efficient background location recording
 - **Google Timeline Import** - Import location history from Google Takeout exports
 - **Travel Statistics** - Countries visited, cities explored, yearly summaries
+- **Recorded Days Audit** - Filter by date and inspect country evidence or missing data day by day
 - **Privacy-First** - Local-only storage, no cloud uploads, no account required
 
 ## Quick Start
@@ -76,12 +77,14 @@ RoamAtlas/
 ## Roadmap
 
 - [x] Project setup and architecture
-- [x] Dashboard with demo data
-- [ ] Google Timeline JSON import
-- [ ] GPS background tracking service
-- [ ] Full Google Maps integration
-- [ ] Day counting calculations
-- [ ] Data export functionality
+- [x] Dashboard and statistics using real user data
+- [x] Streaming Google on-device Timeline import
+- [x] Persistent GPS background tracking service
+- [x] Google Maps integration with scalable sampling
+- [x] Offline country and city attribution
+- [x] Country day counting and transit classification
+- [x] AES-256 encrypted export and restore
+- [x] Location-aware flight reminders with live traffic/status links
 - [ ] Foldable screen optimizations
 
 ## Troubleshooting

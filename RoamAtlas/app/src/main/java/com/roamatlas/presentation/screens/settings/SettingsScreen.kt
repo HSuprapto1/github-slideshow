@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CloudUpload
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -27,9 +30,11 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,9 +43,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,17 +58,46 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.roamatlas.BuildConfig
+
+private enum class SettingsInformation {
+    PRIVACY,
+    ABOUT,
+    HELP
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onNavigateToImport: () -> Unit = {},
     onNavigateToGpsTracking: () -> Unit = {},
+    onNavigateToStatistics: () -> Unit = {},
     onNavigateToHomeCountry: () -> Unit = {},
     onNavigateToImportFlights: () -> Unit = {},
+    onNavigateToJourneys: () -> Unit = {},
     onNavigateToFlightReminders: () -> Unit = {},
-    onNavigateToLocalTimelineImport: () -> Unit = {}
+    onNavigateToLocalTimelineImport: () -> Unit = {},
+    onNavigateToBackup: () -> Unit = {},
+    onNavigateToStorageUsage: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    var informationDialog by remember { mutableStateOf<SettingsInformation?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshAccount()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -100,9 +137,9 @@ fun SettingsScreen(
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.Default.Download,
-                        title = "Export Data",
-                        subtitle = "Export all location data as JSON",
-                        onClick = { /* TODO */ }
+                        title = "Encrypted backup",
+                        subtitle = "Export or restore all RoamAtlas data",
+                        onClick = onNavigateToBackup
                     )
                 }
             }
@@ -129,6 +166,13 @@ fun SettingsScreen(
             item {
                 SettingsCard {
                     SettingsItem(
+                        icon = Icons.Default.QueryStats,
+                        title = "Statistics",
+                        subtitle = "Open the travel statistics screen",
+                        onClick = onNavigateToStatistics
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
                         icon = Icons.Default.Home,
                         title = "Home Country",
                         subtitle = "Set your home country for travel statistics",
@@ -138,14 +182,23 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.FlightTakeoff,
                         title = "Import Flights",
-                        subtitle = "Import from Gmail or add flights manually",
+                        subtitle = uiState.connectedGmail?.let {
+                            "Connected Gmail: $it"
+                        } ?: "Gmail not connected · tap to connect or add flights",
                         onClick = onNavigateToImportFlights
+                    )
+                    HorizontalDivider()
+                    SettingsItem(
+                        icon = Icons.Default.Route,
+                        title = "Journeys",
+                        subtitle = "Combine flights, review connections, and share itineraries",
+                        onClick = onNavigateToJourneys
                     )
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.Default.NotificationsActive,
                         title = "Flight Reminders",
-                        subtitle = "Smart reminders based on location & traffic",
+                        subtitle = "Distance estimates with links to live traffic and status",
                         onClick = onNavigateToFlightReminders
                     )
                 }
@@ -177,15 +230,15 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.PrivacyTip,
                         title = "Privacy Policy",
-                        subtitle = "Local-first, no cloud uploads",
-                        onClick = { /* TODO */ }
+                        subtitle = "How RoamAtlas handles your information",
+                        onClick = { informationDialog = SettingsInformation.PRIVACY }
                     )
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.Default.Storage,
                         title = "Storage Usage",
                         subtitle = "Database size and management",
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToStorageUsage
                     )
                     HorizontalDivider()
                     SettingsItem(
@@ -207,15 +260,15 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.Info,
                         title = "About RoamAtlas",
-                        subtitle = "Version 0.1.0",
-                        onClick = { /* TODO */ }
+                        subtitle = "Version ${BuildConfig.VERSION_NAME}",
+                        onClick = { informationDialog = SettingsInformation.ABOUT }
                     )
                     HorizontalDivider()
                     SettingsItem(
                         icon = Icons.AutoMirrored.Filled.HelpOutline,
                         title = "Help & Feedback",
                         subtitle = "Report issues, request features",
-                        onClick = { /* TODO */ }
+                        onClick = { informationDialog = SettingsInformation.HELP }
                     )
                 }
             }
@@ -232,7 +285,7 @@ fun SettingsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "RoamAtlas v0.1.0",
+                            text = "RoamAtlas v${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -256,6 +309,67 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
+    }
+
+    informationDialog?.let { information ->
+        val title = when (information) {
+            SettingsInformation.PRIVACY -> "Privacy Policy"
+            SettingsInformation.ABOUT -> "About RoamAtlas"
+            SettingsInformation.HELP -> "Help & Feedback"
+        }
+        val message = when (information) {
+            SettingsInformation.PRIVACY ->
+                "Your Timeline locations, counters, manual choices, and imported flight details " +
+                    "are stored in RoamAtlas on this device. RoamAtlas does not upload your " +
+                    "Timeline to a RoamAtlas server.\n\n" +
+                    "If you choose Gmail import, RoamAtlas asks Google for read-only Gmail " +
+                    "permission and searches booking messages through Google. Imported flight " +
+                    "details are then saved locally. RoamAtlas cannot send, edit, or delete email.\n\n" +
+                    "When you add photos from Dashboard +, RoamAtlas reads each photo’s GPS and " +
+                    "creates a timeline point with a thumbnail. If a nearby point already exists, " +
+                    "the photo is linked to it instead of adding a duplicate. Gallery originals " +
+                    "stay in your library; thumbnails are stored in RoamAtlas app storage.\n\n" +
+                    "Journey sharing uses Android’s sharing menu and sends only the details you " +
+                    "choose. Booking references are excluded by default because they can provide " +
+                    "access to a reservation when combined with passenger information.\n\n" +
+                    "Google Maps tiles, Gmail, and any airline-status page require internet access " +
+                    "and are governed by those providers’ policies. Encrypted backups are written " +
+                    "only to the file location you choose. Android may also include RoamAtlas data " +
+                    "in your phone’s device backup when Android backup is enabled; that is controlled " +
+                    "from your phone’s system backup settings. You can disconnect Gmail at any time."
+            SettingsInformation.ABOUT ->
+                "RoamAtlas ${BuildConfig.VERSION_NAME}\n\n" +
+                    "A local-first personal travel-history app. It turns your Google Timeline or " +
+                    "phone GPS records into transparent country, city, map, day, and home-versus-" +
+                    "abroad summaries. You remain in control of manual day, flight, gate, and " +
+                    "terminal corrections.\n\n" +
+                    "Country and city totals reflect only dates that contain usable location records."
+            SettingsInformation.HELP ->
+                "If a number looks wrong, open Days to inspect the location evidence and correct " +
+                    "individual dates. Tap a country or city to inspect its recorded dates and map.\n\n" +
+                    "To add photos: Dashboard + → Photo to timeline, or open the Photos tab. " +
+                    "Photos without GPS can use current location or a map/address pick. " +
+                    "Today’s point count is on the Dashboard Today card.\n\n" +
+                    "To label a place name (for example UTAN → Home): Dashboard → Cities → open the place.\n\n" +
+                    "For Gmail error code 10, the app’s Google connection is not configured for this " +
+                    "signed APK. This is an app setup problem, not a problem with your Gmail password."
+        }
+        AlertDialog(
+            onDismissRequest = { informationDialog = null },
+            title = { Text(title) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                ) {
+                    Text(message)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { informationDialog = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

@@ -15,8 +15,11 @@ import com.google.api.services.gmail.GmailScopes
 import com.google.api.services.gmail.model.Message
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.Base64
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -74,13 +77,16 @@ class GmailFlightImporter @Inject constructor(
      * Get the sign-in intent for Google OAuth with Gmail read access.
      */
     fun getSignInIntent(): Intent {
+        googleSignInClient = createSignInClient()
+        return googleSignInClient!!.signInIntent
+    }
+
+    private fun createSignInClient(): GoogleSignInClient {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestScopes(Scope(GmailScopes.GMAIL_READONLY))
             .build()
-        
-        googleSignInClient = GoogleSignIn.getClient(context, gso)
-        return googleSignInClient!!.signInIntent
+        return GoogleSignIn.getClient(context, gso)
     }
     
     /**
@@ -123,12 +129,29 @@ class GmailFlightImporter @Inject constructor(
     fun getSignedInEmail(): String? {
         return GoogleSignIn.getLastSignedInAccount(context)?.email
     }
+
+    suspend fun restoreSignedInSession(): Boolean {
+        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return false
+        if (!GoogleSignIn.hasPermissions(account, Scope(GmailScopes.GMAIL_READONLY))) {
+            return false
+        }
+        return handleSignInResult(account)
+    }
     
     /**
      * Sign out from Gmail.
      */
     suspend fun signOut() = withContext(Dispatchers.Main) {
-        googleSignInClient?.signOut()
+        val client = googleSignInClient ?: createSignInClient()
+        suspendCancellableCoroutine { continuation ->
+            client.revokeAccess()
+                .addOnSuccessListener {
+                    if (continuation.isActive) continuation.resume(Unit)
+                }
+                .addOnFailureListener { error ->
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+        }
         gmailService = null
     }
     

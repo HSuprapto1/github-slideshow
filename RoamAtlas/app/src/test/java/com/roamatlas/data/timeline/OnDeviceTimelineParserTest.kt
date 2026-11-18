@@ -3,6 +3,7 @@ package com.roamatlas.data.timeline
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.google.gson.JsonParser
 
 class OnDeviceTimelineParserTest {
 
@@ -113,5 +114,25 @@ class OnDeviceTimelineParserTest {
         val json = """{ "locations": [ { "latitudeE7": 1, "longitudeE7": 2 } ] }"""
         val parsed = OnDeviceTimelineParser.parse(json)
         assertEquals(OnDeviceTimelineParser.Kind.NOT_THIS_FORMAT, parsed.kind)
+    }
+
+    @Test
+    fun sourceIdsKeepFullCoordinatePrecision() {
+        val first = JsonParser.parseString(
+            """
+            {
+              "startTime": "2026-01-01T00:00:00Z",
+              "timelinePath": [
+                {"point": "1.123451°, 2.123451°", "time": "2026-01-01T00:01:00Z"},
+                {"point": "1.123452°, 2.123452°", "time": "2026-01-01T00:01:00Z"}
+              ]
+            }
+            """.trimIndent()
+        ).asJsonObject
+
+        val points = OnDeviceTimelineParser.parseSegment(first).points
+
+        assertEquals(2, points.size)
+        assertTrue(points[0].originalSourceId != points[1].originalSourceId)
     }
 }

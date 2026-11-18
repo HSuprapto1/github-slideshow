@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path
+        name="shared_journeys"
+        path="shared_journeys/" />
+    <external-files-path
+        name="place_photos"
+        path="place_photos/" />
+    <files-path
+        name="photo_thumbs"
+        path="photo_thumbs/" />
+    <files-path
+        name="journey_photos"
+        path="journey_photos/" />
+    <cache-path
+        name="shared_photos"
+        path="shared_photos/" />
+</paths>

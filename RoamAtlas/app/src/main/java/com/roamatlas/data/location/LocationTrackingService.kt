@@ -12,6 +12,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.roamatlas.MainActivity
 import com.roamatlas.R
+import com.roamatlas.data.geo.OfflineGeoResolver
+import com.roamatlas.data.journey.JourneyTravelDetector
 import com.roamatlas.domain.model.LocationRecord
 import com.roamatlas.domain.repository.LocationRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -30,6 +32,15 @@ class LocationTrackingService : Service() {
     
     @Inject
     lateinit var locationRepository: LocationRepository
+
+    @Inject
+    lateinit var trackingPreferences: TrackingPreferences
+
+    @Inject
+    lateinit var geoResolver: OfflineGeoResolver
+
+    @Inject
+    lateinit var journeyTravelDetector: JourneyTravelDetector
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
@@ -48,6 +59,7 @@ class LocationTrackingService : Service() {
             ACTION_STOP -> stopTracking()
             ACTION_PAUSE -> pauseTracking()
             ACTION_RESUME -> resumeTracking()
+            null -> if (trackingPreferences.enabled) startTracking(null)
         }
         return START_STICKY
     }
@@ -55,9 +67,10 @@ class LocationTrackingService : Service() {
     private fun startTracking(intent: Intent?) {
         if (isTracking) return
         
-        val modeOrdinal = intent?.getIntExtra(EXTRA_TRACKING_MODE, TrackingMode.SMART.ordinal)
-            ?: TrackingMode.SMART.ordinal
+        val modeOrdinal = intent?.getIntExtra(EXTRA_TRACKING_MODE, trackingPreferences.mode.ordinal)
+            ?: trackingPreferences.mode.ordinal
         val mode = TrackingMode.entries[modeOrdinal]
+        trackingPreferences.mode = mode
         
         val configuration = when (mode) {
             TrackingMode.HIGH_ACCURACY -> TrackingConfiguration.HIGH_ACCURACY
@@ -79,14 +92,17 @@ class LocationTrackingService : Service() {
         
         if (success) {
             isTracking = true
+            trackingPreferences.enabled = true
             updateNotification("Tracking Active", "Recording your location")
         } else {
+            trackingPreferences.enabled = false
             stopSelf()
         }
     }
     
     private fun stopTracking() {
         locationTracker.stopTracking()
+        trackingPreferences.enabled = false
         isTracking = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -105,18 +121,28 @@ class LocationTrackingService : Service() {
     private fun saveLocation(location: LocationRecord) {
         serviceScope.launch {
             try {
-                val isDuplicate = location.originalSourceId?.let {
+                val place = geoResolver.resolve(location.latitude, location.longitude)
+                val enriched = location.copy(
+                    countryCode = place.countryCode,
+                    countryName = place.countryName,
+                    city = place.city
+                )
+                val isDuplicate = enriched.originalSourceId?.let {
                     locationRepository.isDuplicate(it)
                 } ?: false
                 
                 if (!isDuplicate) {
-                    locationRepository.insertLocation(location)
-                    
+                    locationRepository.insertLocation(enriched)
+                    journeyTravelDetector.onNewLocation(enriched)
+
                     val count = locationTracker.trackingState.value.locationCount
                     updateNotification(
                         "Tracking Active",
                         "$count locations recorded"
                     )
+                } else {
+                    // Still run detection on fresh GPS even if DB deduped the row.
+                    journeyTravelDetector.onNewLocation(enriched)
                 }
             } catch (e: Exception) {
                 // Log error but don't crash the service

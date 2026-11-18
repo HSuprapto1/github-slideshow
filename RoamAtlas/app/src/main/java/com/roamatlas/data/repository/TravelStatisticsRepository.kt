@@ -5,15 +5,17 @@ import com.roamatlas.data.local.dao.LocationDao
 import com.roamatlas.data.local.dao.UserSettingsDao
 import com.roamatlas.data.local.entity.UserSettingsEntity
 import com.roamatlas.domain.model.CountryVisitStats
+import com.roamatlas.domain.model.CountryVisitClassification
 import com.roamatlas.domain.model.TravelStatistics
 import com.roamatlas.domain.model.YearlyTravelStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.mapLatest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,7 +23,8 @@ import javax.inject.Singleton
 class TravelStatisticsRepository @Inject constructor(
     private val locationDao: LocationDao,
     private val flightDao: FlightDao,
-    private val userSettingsDao: UserSettingsDao
+    private val userSettingsDao: UserSettingsDao,
+    private val dayOverrideRepository: DayOverrideRepository
 ) {
     
     suspend fun getHomeCountryCode(): String? {
@@ -41,33 +44,56 @@ class TravelStatisticsRepository @Inject constructor(
         )
     }
     
-    fun getTravelStatistics(): Flow<TravelStatistics> = flow {
-        val homeCountryCode = getHomeCountryCode()
-        
-        val locationCount = locationDao.getLocationCount().first()
-        val countryCodes = locationDao.getDistinctCountryCodes().first()
+    fun getTravelStatistics(): Flow<TravelStatistics> =
+        combine(
+            locationDao.getLocationCount(),
+            flightDao.getFlightCount(),
+            getHomeCountryCodeFlow()
+        ) { locationCount, flightCount, homeCountryCode ->
+            Triple(locationCount, flightCount, homeCountryCode)
+        }.mapLatest { (locationCount, flightCount, homeCountryCode) ->
+        val countrySummaries = locationDao.getCountryVisitSummaries()
         val earliestTimestamp = locationDao.getEarliestTimestamp()
         val latestTimestamp = locationDao.getLatestTimestamp()
         
         val totalFlightDistance = flightDao.getTotalFlightDistance() ?: 0.0
         val totalFlightDuration = flightDao.getTotalFlightDuration() ?: 0
-        val flightCount = flightDao.getFlightCount().first()
         val longestFlight = flightDao.getLongestFlight()
         
-        val countryStats = calculateCountryStats(homeCountryCode)
-        val mostVisited = countryStats.maxByOrNull { it.daysSpent }
+        val flights = flightDao.getAllFlights().first().sortedBy { it.departureTimeMillis }
+        val countryStats = countrySummaries.map { summary ->
+            val classification = classifyCountry(summary.countryCode, summary.daysSpent, flights)
+            CountryVisitStats(
+                countryCode = summary.countryCode,
+                countryName = summary.countryName ?: getCountryName(summary.countryCode),
+                daysSpent = summary.daysSpent,
+                visitCount = summary.visitCount,
+                firstVisit = Instant.ofEpochMilli(summary.firstTimestamp)
+                    .atZone(ZoneId.systemDefault()).toLocalDate(),
+                lastVisit = Instant.ofEpochMilli(summary.lastTimestamp)
+                    .atZone(ZoneId.systemDefault()).toLocalDate(),
+                classification = classification.first,
+                classificationReason = classification.second
+            )
+        }
+        val mostVisited = countryStats
+            .filter { it.classification != CountryVisitClassification.TRANSIT }
+            .maxByOrNull { it.daysSpent }
         
         val (daysInside, daysOutside) = if (homeCountryCode != null) {
             calculateDaysInsideOutside(homeCountryCode)
         } else {
             Pair(0, 0)
         }
+        val totalTrackedDays = locationDao.countTrackedDays()
         
         val yearlyStats = calculateYearlyStats()
         
-        emit(TravelStatistics(
-            totalCountriesVisited = countryCodes.size,
-            totalCitiesVisited = 0,
+        TravelStatistics(
+            totalCountriesVisited = countryStats.count {
+                it.classification != CountryVisitClassification.TRANSIT
+            },
+            totalCitiesVisited = locationDao.countDistinctCities(),
             totalLocationsRecorded = locationCount,
             totalFlights = flightCount,
             totalFlightDistanceKm = totalFlightDistance,
@@ -80,7 +106,7 @@ class TravelStatisticsRepository @Inject constructor(
             mostVisitedCountryDays = mostVisited?.daysSpent ?: 0,
             daysOutsideHomeCountry = daysOutside,
             daysInsideHomeCountry = daysInside,
-            totalDaysTracked = daysInside + daysOutside,
+            totalDaysTracked = totalTrackedDays,
             earliestRecordDate = earliestTimestamp?.let {
                 Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
             },
@@ -89,56 +115,93 @@ class TravelStatisticsRepository @Inject constructor(
             },
             countriesVisitedList = countryStats,
             yearlyStats = yearlyStats
-        ))
+        )
     }
-    
-    private suspend fun calculateCountryStats(homeCountryCode: String?): List<CountryVisitStats> {
-        val countryCodes = locationDao.getDistinctCountryCodes().first()
-        
-        return countryCodes.mapNotNull { code ->
-            if (code.isNullOrBlank()) return@mapNotNull null
-            
-            val countryName = getCountryName(code)
-            val earliest = locationDao.getEarliestTimestamp()
-            val latest = locationDao.getLatestTimestamp()
-            
-            if (earliest == null || latest == null) return@mapNotNull null
-            
-            val daysCount = locationDao.countDaysInCountry(code, earliest, latest)
-            
-            CountryVisitStats(
-                countryCode = code,
-                countryName = countryName,
-                daysSpent = daysCount,
-                visitCount = 1,
-                firstVisit = null,
-                lastVisit = null
+
+    private suspend fun classifyCountry(
+        countryCode: String,
+        daysSpent: Int,
+        flights: List<com.roamatlas.data.local.entity.FlightEntity>
+    ): Pair<CountryVisitClassification, String?> {
+        for (index in 0 until flights.lastIndex) {
+            val arriving = flights[index]
+            val onward = flights[index + 1]
+            val layoverMillis = onward.departureTimeMillis - arriving.arrivalTimeMillis
+            if (layoverMillis !in 0..TimeUnit.HOURS.toMillis(24)) continue
+            val arrivalCountry = arriving.arrivalCountryCode
+                ?: locationDao.getDominantCountryBetween(
+                    arriving.arrivalTimeMillis - TimeUnit.HOURS.toMillis(2),
+                    arriving.arrivalTimeMillis + TimeUnit.HOURS.toMillis(6)
+                )
+            val onwardCountry = onward.departureCountryCode
+                ?: locationDao.getDominantCountryBetween(
+                    onward.departureTimeMillis - TimeUnit.HOURS.toMillis(6),
+                    onward.departureTimeMillis + TimeUnit.HOURS.toMillis(2)
+                )
+            if (arrivalCountry != countryCode || onwardCountry != countryCode) continue
+
+            val hours = TimeUnit.MILLISECONDS.toHours(layoverMillis)
+            val sameAirport = arriving.arrivalAirportCode.equals(
+                onward.departureAirportCode,
+                ignoreCase = true
             )
-        }.sortedByDescending { it.daysSpent }
+            return when {
+                sameAirport && hours <= 12 && daysSpent <= 1 ->
+                    CountryVisitClassification.TRANSIT to
+                        "Connecting flight at ${arriving.arrivalAirportCode} after ${hours}h"
+                daysSpent <= 1 ->
+                    CountryVisitClassification.UNCERTAIN to
+                        "Possible ${hours}h connection; verify whether you entered the country"
+                else -> CountryVisitClassification.VISITED to null
+            }
+        }
+        return CountryVisitClassification.VISITED to null
     }
     
     private suspend fun calculateDaysInsideOutside(homeCountryCode: String): Pair<Int, Int> {
         val earliest = locationDao.getEarliestTimestamp() ?: return Pair(0, 0)
         val latest = locationDao.getLatestTimestamp() ?: return Pair(0, 0)
+        val insideEvidenceDates = locationDao.getDaysInCountry(
+            homeCountryCode,
+            earliest,
+            latest
+        ).mapNotNull { runCatching { LocalDate.parse(it.date) }.getOrNull() }.toSet()
+        val evidenceDates = locationDao.getDaysOutsideCountry(homeCountryCode, earliest, latest)
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+            .toSet()
+        val firstDate = Instant.ofEpochMilli(earliest)
+            .atZone(ZoneId.systemDefault()).toLocalDate()
+        val lastDate = Instant.ofEpochMilli(latest)
+            .atZone(ZoneId.systemDefault()).toLocalDate()
+        val overrides = dayOverrideRepository.getOverrides(homeCountryCode)
+            .filterKeys { it in firstDate..lastDate }
+        val manualOutside = overrides.filterValues {
+            it == ManualDayClassification.OUTSIDE
+        }.keys
+        val manualInside = overrides.filterValues {
+            it == ManualDayClassification.INSIDE
+        }.keys
+        val daysInHome = ((insideEvidenceDates + manualInside) - manualOutside).size
+        val daysOutside = ((evidenceDates + manualOutside) - manualInside).size
         
-        val daysInHome = locationDao.countDaysInCountry(homeCountryCode, earliest, latest)
-        
-        val totalDays = ((latest - earliest) / (24 * 60 * 60 * 1000)).toInt() + 1
-        val daysOutside = totalDays - daysInHome
-        
-        return Pair(daysInHome, maxOf(0, daysOutside))
+        return Pair(daysInHome, daysOutside)
     }
     
     private suspend fun calculateYearlyStats(): List<YearlyTravelStats> {
-        val flightStats = flightDao.getYearlyFlightStats()
-        
-        return flightStats.map { stats ->
+        val flightStats = flightDao.getYearlyFlightStats().associateBy { it.year }
+        val locationStats = locationDao.getYearlyLocationSummaries().associateBy { it.year }
+        return (flightStats.keys + locationStats.keys)
+            .mapNotNull { it.toIntOrNull() }
+            .sortedDescending()
+            .map { year ->
+            val flight = flightStats[year.toString()]
+            val location = locationStats[year.toString()]
             YearlyTravelStats(
-                year = stats.year.toIntOrNull() ?: 0,
-                countriesVisited = 0,
-                daysTracked = 0,
-                flights = stats.flightCount,
-                flightDistanceKm = stats.totalDistance ?: 0.0
+                year = year,
+                countriesVisited = location?.countriesVisited ?: 0,
+                daysTracked = location?.daysTracked ?: 0,
+                flights = flight?.flightCount ?: 0,
+                flightDistanceKm = flight?.totalDistance ?: 0.0
             )
         }
     }

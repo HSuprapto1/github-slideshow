@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 import com.roamatlas.data.email.ParsedFlight
 import com.roamatlas.data.email.ParsedItinerary
 import java.text.SimpleDateFormat
@@ -76,11 +77,23 @@ fun ImportFlightsScreen(
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data).result
-            if (account != null) {
-                viewModel.handleSignInResult(account)
+        try {
+            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+            viewModel.handleSignInResult(account)
+        } catch (error: Exception) {
+            val statusCode = (error as? ApiException)?.statusCode
+            val detail = when {
+                statusCode == 10 ->
+                    "Google rejected this app’s connection setup (code 10). " +
+                        "Your Gmail account and password are not the problem. " +
+                        "This APK must be registered correctly by the RoamAtlas developer."
+                result.resultCode == Activity.RESULT_CANCELED ->
+                    "sign-in was cancelled"
+                statusCode != null -> "Google sign-in error code $statusCode"
+                else -> error.message ?: "unknown sign-in error"
             }
+            viewModel.handleSignInFailure(detail)
         }
     }
     
@@ -93,8 +106,17 @@ fun ImportFlightsScreen(
     
     LaunchedEffect(uiState.importSuccess) {
         if (uiState.importSuccess) {
-            snackbarHostState.showSnackbar("Flights imported successfully!")
+            snackbarHostState.showSnackbar(
+                uiState.importMessage ?: "Flights imported successfully!"
+            )
             viewModel.clearImportSuccess()
+        }
+    }
+
+    LaunchedEffect(uiState.connectionMessage) {
+        uiState.connectionMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearConnectionMessage()
         }
     }
     
@@ -343,9 +365,10 @@ private fun GmailConnectionCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
-                    if (isSignedIn && email != null) {
+                    if (isSignedIn) {
                         Text(
-                            text = email,
+                            text = email?.let { "Connected as $it" }
+                                ?: "Connected account email unavailable",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )

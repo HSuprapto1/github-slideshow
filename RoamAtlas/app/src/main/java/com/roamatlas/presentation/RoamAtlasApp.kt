@@ -17,23 +17,36 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.roamatlas.presentation.navigation.Screen
 import com.roamatlas.presentation.navigation.bottomNavItems
 import com.roamatlas.presentation.screens.dashboard.DashboardScreenV2
+import com.roamatlas.presentation.screens.country.CountryDetailScreen
+import com.roamatlas.presentation.screens.country.CountriesScreen
+import com.roamatlas.presentation.screens.city.CitiesScreen
+import com.roamatlas.presentation.screens.city.CityDetailScreen
+import com.roamatlas.presentation.screens.days.DayAuditScreen
+import com.roamatlas.presentation.screens.photos.PhotosScreen
 import com.roamatlas.presentation.screens.timelineimport.ImportTimelineScreen
 import com.roamatlas.presentation.screens.map.MapScreenV2
 import com.roamatlas.presentation.screens.flights.AddFlightScreen
 import com.roamatlas.presentation.screens.flights.FlightRemindersScreen
 import com.roamatlas.presentation.screens.flights.ImportFlightsScreen
+import com.roamatlas.presentation.screens.journey.JourneyDetailScreen
+import com.roamatlas.presentation.screens.journey.JourneysScreen
 import com.roamatlas.presentation.screens.timelineimport.LocalTimelineImportScreen
 import com.roamatlas.presentation.screens.settings.HomeCountryScreen
+import com.roamatlas.presentation.screens.settings.BackupScreen
 import com.roamatlas.presentation.screens.settings.SettingsScreen
+import com.roamatlas.presentation.screens.settings.StorageUsageScreen
 import com.roamatlas.presentation.screens.statistics.StatisticsScreen
 import com.roamatlas.presentation.screens.tracking.GpsTrackingScreen
+import java.time.LocalDate
 
 @Composable
 fun RoamAtlasApp(
@@ -50,7 +63,11 @@ fun RoamAtlasApp(
             if (!useNavigationRail) {
                 NavigationBar {
                     bottomNavItems.forEach { screen ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == screen.route ||
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true) ||
+                                (screen == Screen.Journeys && it.route?.startsWith("journey") == true)
+                        } == true
                         NavigationBarItem(
                             icon = {
                                 Icon(
@@ -83,7 +100,11 @@ fun RoamAtlasApp(
             if (useNavigationRail) {
                 NavigationRail {
                     bottomNavItems.forEach { screen ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == screen.route ||
+                                (screen == Screen.Map && it.route?.startsWith("map/") == true) ||
+                                (screen == Screen.Journeys && it.route?.startsWith("journey") == true)
+                        } == true
                         NavigationRailItem(
                             icon = {
                                 Icon(
@@ -113,13 +134,125 @@ fun RoamAtlasApp(
                 modifier = Modifier.weight(1f)
             ) {
                 composable(Screen.Dashboard.route) {
-                    DashboardScreenV2()
+                    DashboardScreenV2(
+                        onSelectHomeCountry = {
+                            navController.navigate(Screen.HomeCountry.route)
+                        },
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        },
+                        onOpenCountries = {
+                            navController.navigate(Screen.Countries.route)
+                        },
+                        onOpenCities = {
+                            navController.navigate(Screen.Cities.route)
+                        },
+                        onOpenToday = {
+                            navController.navigate(
+                                Screen.Map.forDate(java.time.LocalDate.now().toString())
+                            )
+                        },
+                        onOpenJourneys = {
+                            navController.navigate(Screen.Journeys.route)
+                        },
+                        onOpenJourney = { journeyId ->
+                            navController.navigate(Screen.JourneyDetail.forId(journeyId))
+                        },
+                        onOpenDays = {
+                            navController.navigate(Screen.Days.route)
+                        }
+                    )
                 }
                 composable(Screen.Map.route) {
-                    MapScreenV2()
+                    MapScreenV2(
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
+                }
+                composable(
+                    route = Screen.Map.DAY_ROUTE,
+                    arguments = listOf(navArgument("date") { type = NavType.StringType })
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
+                    MapScreenV2(
+                        initialDate = date,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
+                }
+                composable(
+                    route = Screen.Map.DAY_COUNTRY_ROUTE,
+                    arguments = listOf(
+                        navArgument("date") { type = NavType.StringType },
+                        navArgument("country") { type = NavType.StringType }
+                    )
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
+                    val country = entry.arguments?.getString("country")
+                        ?.let { android.net.Uri.decode(it) }
+                    MapScreenV2(
+                        initialDate = date,
+                        initialCountryCode = country,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
+                }
+                composable(
+                    route = Screen.Map.DAY_CITY_ROUTE,
+                    arguments = listOf(
+                        navArgument("date") { type = NavType.StringType },
+                        navArgument("country") { type = NavType.StringType },
+                        navArgument("city") { type = NavType.StringType }
+                    )
+                ) { entry ->
+                    val date = entry.arguments?.getString("date")
+                        ?.let { runCatching { LocalDate.parse(android.net.Uri.decode(it)) }.getOrNull() }
+                    val country = entry.arguments?.getString("country")
+                        ?.let { android.net.Uri.decode(it) }
+                    val city = entry.arguments?.getString("city")
+                        ?.let { android.net.Uri.decode(it) }
+                    MapScreenV2(
+                        initialDate = date,
+                        initialCountryCode = country,
+                        initialCity = city,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
+                }
+                composable(
+                    route = Screen.Map.PHOTO_ROUTE,
+                    arguments = listOf(navArgument("locationId") { type = NavType.StringType })
+                ) { entry ->
+                    val locationId = entry.arguments?.getString("locationId")?.toLongOrNull()
+                    MapScreenV2(
+                        initialLocationId = locationId,
+                        onOpenDays = { navController.navigate(Screen.Days.route) }
+                    )
+                }
+                composable(Screen.Days.route) {
+                    DayAuditScreen(
+                        onOpenMap = { date ->
+                            navController.navigate(Screen.Map.forDate(date.toString()))
+                        }
+                    )
+                }
+                composable(Screen.Photos.route) {
+                    PhotosScreen(
+                        onOpenMap = { photo ->
+                            navController.navigate(Screen.Map.forPhoto(photo.id))
+                        }
+                    )
                 }
                 composable(Screen.Statistics.route) {
-                    StatisticsScreen()
+                    StatisticsScreen(
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        },
+                        onOpenCountries = {
+                            navController.navigate(Screen.Countries.route)
+                        },
+                        onOpenCities = {
+                            navController.navigate(Screen.Cities.route)
+                        }
+                    )
                 }
                 composable(Screen.Settings.route) {
                     SettingsScreen(
@@ -129,17 +262,29 @@ fun RoamAtlasApp(
                         onNavigateToGpsTracking = {
                             navController.navigate(Screen.GpsTracking.route)
                         },
+                        onNavigateToStatistics = {
+                            navController.navigate(Screen.Statistics.route)
+                        },
                         onNavigateToHomeCountry = {
                             navController.navigate(Screen.HomeCountry.route)
                         },
                         onNavigateToImportFlights = {
                             navController.navigate(Screen.ImportFlights.route)
                         },
+                        onNavigateToJourneys = {
+                            navController.navigate(Screen.Journeys.route)
+                        },
                         onNavigateToFlightReminders = {
                             navController.navigate(Screen.FlightReminders.route)
                         },
                         onNavigateToLocalTimelineImport = {
                             navController.navigate(Screen.LocalTimelineImport.route)
+                        },
+                        onNavigateToBackup = {
+                            navController.navigate(Screen.Backup.route)
+                        },
+                        onNavigateToStorageUsage = {
+                            navController.navigate(Screen.StorageUsage.route)
                         }
                     )
                 }
@@ -170,11 +315,23 @@ fun RoamAtlasApp(
                             navController.popBackStack()
                         },
                         onNavigateToAddFlight = {
-                            navController.navigate(Screen.AddFlight.route)
+                            navController.navigate(Screen.AddFlight.create())
                         }
                     )
                 }
-                composable(Screen.AddFlight.route) {
+                composable(
+                    route = Screen.AddFlight.route,
+                    arguments = listOf(
+                        navArgument("journeyId") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        },
+                        navArgument("mode") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
+                    )
+                ) {
                     AddFlightScreen(
                         onNavigateBack = {
                             navController.popBackStack()
@@ -191,10 +348,90 @@ fun RoamAtlasApp(
                         }
                     )
                 }
+                composable(Screen.Journeys.route) {
+                    JourneysScreen(
+                        onOpenJourney = { journeyId ->
+                            navController.navigate(Screen.JourneyDetail.forId(journeyId))
+                        }
+                    )
+                }
+                composable(Screen.JourneyDetail.route) {
+                    JourneyDetailScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode ->
+                            // Only pass ISO country codes — longer/invalid values broke navigation
+                            // so the day tap looked like it did nothing.
+                            val code = countryCode?.trim()?.uppercase()
+                            val route = if (
+                                !code.isNullOrBlank() &&
+                                code.length in 2..3 &&
+                                code.all { it.isLetter() }
+                            ) {
+                                Screen.Map.forCountryDate(date.toString(), code)
+                            } else {
+                                Screen.Map.forDate(date.toString())
+                            }
+                            runCatching {
+                                navController.navigate(route)
+                            }
+                        },
+                        onAddToJourney = { journeyId, mode ->
+                            navController.navigate(Screen.AddFlight.create(journeyId, mode))
+                        }
+                    )
+                }
                 composable(Screen.LocalTimelineImport.route) {
                     LocalTimelineImportScreen(
                         onNavigateBack = {
                             navController.popBackStack()
+                        }
+                    )
+                }
+                composable(Screen.Backup.route) {
+                    BackupScreen(onNavigateBack = { navController.popBackStack() })
+                }
+                composable(Screen.StorageUsage.route) {
+                    StorageUsageScreen(onNavigateBack = { navController.popBackStack() })
+                }
+                composable(Screen.CountryDetail.route) {
+                    CountryDetailScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode ->
+                            navController.navigate(
+                                Screen.Map.forCountryDate(date.toString(), countryCode)
+                            )
+                        }
+                    )
+                }
+                composable(Screen.Countries.route) {
+                    CountriesScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenCountry = { countryCode ->
+                            navController.navigate(Screen.CountryDetail.forCode(countryCode))
+                        }
+                    )
+                }
+                composable(Screen.Cities.route) {
+                    CitiesScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenCity = { city ->
+                            navController.navigate(
+                                Screen.CityDetail.forCity(city.countryCode, city.city)
+                            )
+                        }
+                    )
+                }
+                composable(Screen.CityDetail.route) {
+                    CityDetailScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenMap = { date, countryCode, city ->
+                            navController.navigate(
+                                Screen.Map.forCityDate(
+                                    date.toString(),
+                                    countryCode,
+                                    city
+                                )
+                            )
                         }
                     )
                 }

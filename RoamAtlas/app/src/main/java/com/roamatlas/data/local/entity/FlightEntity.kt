@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["departureTimeMillis"]),
         Index(value = ["departureAirportCode"]),
-        Index(value = ["arrivalAirportCode"])
+        Index(value = ["arrivalAirportCode"]),
+        Index(value = ["journeyId"])
     ]
 )
 data class FlightEntity(
@@ -36,8 +37,57 @@ data class FlightEntity(
     val photoUri: String?,
     val source: String,
     val createdAtMillis: Long,
-    val updatedAtMillis: Long
+    val updatedAtMillis: Long,
+    val journeyId: Long? = null,
+    val journeySequence: Int? = null,
+    val estimatedDepartureTimeMillis: Long? = null,
+    val estimatedArrivalTimeMillis: Long? = null,
+    val flightStatus: String? = null,
+    val separateTicketFromPrevious: Boolean? = null,
+    val minimumConnectionMinutes: Int? = null,
+    /** FLIGHT, TRAIN, BUS, or HOTEL — stations/cities reuse airport code fields. */
+    val transportMode: String = TransportMode.FLIGHT,
+    /** Travel detection outcome — see [TravelLegStatus]. */
+    val travelLegStatus: String? = null,
+    val actualDepartureMillis: Long? = null,
+    val actualArrivalMillis: Long? = null,
+    /** When diverted, the airport where the leg actually ended. */
+    val actualArrivalAirportCode: String? = null,
+    /** Soft-dismiss GPS prompts for this leg until this time ("Not this journey"). */
+    val detectionDismissedUntilMillis: Long? = null
 )
+
+object TransportMode {
+    const val FLIGHT = "FLIGHT"
+    const val TRAIN = "TRAIN"
+    const val BUS = "BUS"
+    const val TAXI = "TAXI"
+    const val OTHER = "OTHER"
+    const val HOTEL = "HOTEL"
+
+    fun label(mode: String?): String = when (mode?.uppercase()) {
+        TRAIN -> "Train"
+        BUS -> "Bus"
+        TAXI -> "Taxi"
+        OTHER -> "Other"
+        HOTEL -> "Hotel"
+        else -> "Flight"
+    }
+
+    fun isFlight(mode: String?): Boolean =
+        mode.isNullOrBlank() || mode.equals(FLIGHT, ignoreCase = true)
+
+    fun isHotel(mode: String?): Boolean =
+        mode.equals(HOTEL, ignoreCase = true)
+
+    fun isStay(mode: String?): Boolean = isHotel(mode)
+
+    fun isGround(mode: String?): Boolean =
+        mode.equals(TRAIN, ignoreCase = true) ||
+            mode.equals(BUS, ignoreCase = true) ||
+            mode.equals(TAXI, ignoreCase = true) ||
+            mode.equals(OTHER, ignoreCase = true)
+}
 
 @Entity(tableName = "trips")
 data class TripEntity(
@@ -51,6 +101,9 @@ data class TripEntity(
     val notes: String?,
     val coverPhotoUri: String?,
     val photoUrisJson: String?,
+    /** PLANNED, IN_PROGRESS, COMPLETED, CANCELLED — see [JourneyStatus]. */
+    val journeyStatus: String = JourneyStatus.PLANNED,
+    val cancelReason: String? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long
 )

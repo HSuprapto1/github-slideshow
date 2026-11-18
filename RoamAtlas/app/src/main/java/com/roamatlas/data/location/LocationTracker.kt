@@ -207,17 +207,26 @@ class LocationTracker @Inject constructor(
             locationCount = _trackingState.value.locationCount + 1
         )
         
+        val altitude = if (location.hasAltitude()) location.altitude else null
+        val speed = if (location.hasSpeed()) location.speed else null
+        val airborne = AirborneClassifier.isLikelyAirborne(altitude, speed)
+        val baseNotes = buildLocationNotes(location)
+        val airborneNote = AirborneClassifier.noteSuffix(airborne)
+        val notes = listOfNotNull(baseNotes, airborneNote)
+            .joinToString(" · ")
+            .takeIf { it.isNotBlank() }
         val record = LocationRecord(
             latitude = location.latitude,
             longitude = location.longitude,
             timestamp = Instant.ofEpochMilli(location.time),
             source = LocationSource.GPS_TRACKING,
             accuracy = if (location.hasAccuracy()) location.accuracy else null,
-            altitude = if (location.hasAltitude()) location.altitude else null,
-            speed = if (location.hasSpeed()) location.speed else null,
+            altitude = altitude,
+            speed = speed,
             confidence = determineConfidence(location),
             originalSourceId = "gps_${location.time}_${location.latitude}_${location.longitude}",
-            notes = buildLocationNotes(location)
+            notes = notes,
+            isAirborne = airborne
         )
         
         onLocationReceived?.invoke(record)

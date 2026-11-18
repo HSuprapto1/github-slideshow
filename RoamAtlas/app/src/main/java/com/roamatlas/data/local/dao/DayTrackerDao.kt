@@ -14,6 +14,9 @@ interface DayTrackerDao {
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(tracker: DayTrackerEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(trackers: List<DayTrackerEntity>)
     
     @Update
     suspend fun update(tracker: DayTrackerEntity)
@@ -32,6 +35,12 @@ interface DayTrackerDao {
     
     @Query("SELECT MAX(displayOrder) FROM day_trackers")
     suspend fun getMaxDisplayOrder(): Int?
+
+    @Query("SELECT * FROM day_trackers ORDER BY id ASC")
+    suspend fun getAllSnapshot(): List<DayTrackerEntity>
+
+    @Query("DELETE FROM day_trackers")
+    suspend fun deleteAll()
     
     @Query("UPDATE day_trackers SET displayOrder = :order WHERE id = :id")
     suspend fun updateDisplayOrder(id: Long, order: Int)

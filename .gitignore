@@ -2,3 +2,6 @@ _site/
 .sass-cache/
 .jekyll-metadata
 .bundle
+Timeline*.zip
+roamatlas-v*.apk
+**/.kotlin/

@@ -4,9 +4,9 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.OffsetDateTime
-import java.util.Locale
 
 /**
  * Reads the unlocked Timeline file created by the phone itself.
@@ -46,6 +46,11 @@ object OnDeviceTimelineParser {
         val places: Int = 0,
         val skipped: Int = 0,
         val message: String = ""
+    )
+
+    data class SegmentPoints(
+        val points: List<Point>,
+        val places: Int
     )
 
     fun parse(content: String): Parsed {
@@ -216,6 +221,18 @@ object OnDeviceTimelineParser {
         return places
     }
 
+    fun parseSegment(segment: JsonObject): SegmentPoints {
+        val points = mutableListOf<Point>()
+        val places = appendSegment(segment, points)
+        return SegmentPoints(points, places)
+    }
+
+    fun parseRawSignal(signal: JsonObject): Point? {
+        val points = mutableListOf<Point>()
+        appendRawSignal(signal, points)
+        return points.singleOrNull()
+    }
+
     private fun appendRawSignal(signal: JsonObject, out: MutableList<Point>): Int {
         val position = signal.obj("position") ?: return 0
         val coords = extractLatLng(position.get("LatLng"))
@@ -259,8 +276,7 @@ object OnDeviceTimelineParser {
         altitude: Double? = null,
         speed: Float? = null
     ): Point {
-        val latText = String.format(Locale.US, "%.5f", coords.first)
-        val lonText = String.format(Locale.US, "%.5f", coords.second)
+        val sourceId = stableSourceId(kind, timestampMillis, coords.first, coords.second)
         return Point(
             latitude = coords.first,
             longitude = coords.second,
@@ -269,9 +285,20 @@ object OnDeviceTimelineParser {
             altitude = altitude,
             speed = speed,
             confidence = confidence,
-            originalSourceId = "gmaps_${kind}_${timestampMillis}_${latText}_${lonText}",
+            originalSourceId = sourceId,
             notes = notes
         )
+    }
+
+    private fun stableSourceId(
+        kind: String,
+        timestampMillis: Long,
+        latitude: Double,
+        longitude: Double
+    ): String {
+        val value = "$kind|$timestampMillis|${latitude.toString()}|${longitude.toString()}"
+        val hash = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+        return "gmaps_" + hash.joinToString("") { "%02x".format(it) }
     }
 
     internal fun extractLatLng(value: JsonElement?): Pair<Double, Double>? {
