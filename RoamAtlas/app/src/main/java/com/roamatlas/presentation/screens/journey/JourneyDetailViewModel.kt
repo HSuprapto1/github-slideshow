@@ -56,6 +56,8 @@ data class JourneyDetailUiState(
     val journeyDays: List<JourneyDaySummary> = emptyList(),
     val trackedDayCount: Int = 0,
     val showGpsTrack: Boolean = true,
+    /** Journey map: planned route, actual GPS paths, or both. */
+    val mapDisplayMode: JourneyMapDisplayMode = JourneyMapDisplayMode.BOTH,
     /** Live / last-known device GPS for centering the journey map. */
     val currentLatitude: Double? = null,
     val currentLongitude: Double? = null,
@@ -141,6 +143,13 @@ class JourneyDetailViewModel @Inject constructor(
 
     fun setShowGpsTrack(show: Boolean) {
         _uiState.value = _uiState.value.copy(showGpsTrack = show)
+    }
+
+    fun setMapDisplayMode(mode: JourneyMapDisplayMode) {
+        _uiState.value = _uiState.value.copy(
+            mapDisplayMode = mode,
+            showGpsTrack = mode != JourneyMapDisplayMode.ROUTE
+        )
     }
 
     fun refreshCurrentGps() {
@@ -657,4 +666,10 @@ class JourneyDetailViewModel @Inject constructor(
             )
         }
     }
+}
+
+enum class JourneyMapDisplayMode {
+    ROUTE,
+    ACTUAL,
+    BOTH
 }

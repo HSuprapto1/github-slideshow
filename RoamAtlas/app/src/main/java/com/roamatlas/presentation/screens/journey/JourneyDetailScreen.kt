@@ -86,7 +86,10 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.roamatlas.data.airport.Airport
+import com.roamatlas.data.flight.FlightPathAnalyzer
 import com.roamatlas.data.flight.FlightScheduleTimes
+import com.google.android.gms.maps.model.Dash
+import com.google.android.gms.maps.model.Gap
 import com.roamatlas.data.journey.ConnectionRisk
 import com.roamatlas.data.journey.JourneyConnection
 import com.roamatlas.data.journey.JourneyShareFormatter
@@ -134,6 +137,15 @@ fun JourneyDetailScreen(
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
     var previewPdfUri by remember { mutableStateOf<String?>(null) }
+    var flightPathFlight by remember { mutableStateOf<FlightEntity?>(null) }
+    val flightPathReports = remember(journey?.flights, state.gpsTrack, state.airports) {
+        val j = journey ?: return@remember emptyMap()
+        FlightPathAnalyzer.reportsForJourney(
+            flights = j.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) },
+            gpsTrack = state.gpsTrack,
+            airports = state.airports
+        )
+    }
 
     LaunchedEffect(state.wasDeleted) {
         if (state.wasDeleted) onNavigateBack()
@@ -276,8 +288,10 @@ fun JourneyDetailScreen(
                     SimpleJourneyItinerary(
                         journey = value,
                         airports = state.airports,
+                        pathReports = flightPathReports,
                         onEditLeg = { editingFlight = it },
-                        onRemoveLeg = { removingFlight = it }
+                        onRemoveLeg = { removingFlight = it },
+                        onOpenFlightPath = { flightPathFlight = it }
                     )
                 }
                 items(
@@ -381,16 +395,49 @@ fun JourneyDetailScreen(
                         journey = value,
                         airports = state.airports,
                         gpsTrack = state.gpsTrack,
-                        showGpsTrack = state.showGpsTrack,
+                        pathReports = flightPathReports,
+                        mapDisplayMode = state.mapDisplayMode,
                         currentLatitude = state.currentLatitude,
                         currentLongitude = state.currentLongitude,
-                        onToggleGpsTrack = viewModel::setShowGpsTrack,
-                        onRefreshGps = viewModel::refreshCurrentGps
+                        onMapDisplayMode = viewModel::setMapDisplayMode,
+                        onRefreshGps = viewModel::refreshCurrentGps,
+                        onOpenFlightPath = { flightPathFlight = it }
                     )
                 }
                 item { Spacer(Modifier.height(50.dp)) }
             }
         }
+    }
+
+    flightPathFlight?.let { flight ->
+        val report = flightPathReports[flight.id]
+            ?: FlightPathAnalyzer.reportForFlight(
+                flight = flight,
+                gpsTrack = state.gpsTrack,
+                departureAirport = state.airports[flight.departureAirportCode],
+                arrivalAirport = state.airports[
+                    flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                        ?: flight.arrivalAirportCode
+                ],
+                scheduledDurationMinutes = FlightScheduleTimes.durationMinutes(
+                    flight,
+                    state.airports[flight.departureAirportCode],
+                    state.airports[
+                        flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                            ?: flight.arrivalAirportCode
+                    ]
+                )
+            )
+        FlightPathScreen(
+            flight = flight,
+            report = report,
+            departureAirport = state.airports[flight.departureAirportCode],
+            arrivalAirport = state.airports[
+                flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                    ?: flight.arrivalAirportCode
+            ],
+            onBack = { flightPathFlight = null }
+        )
     }
 
     fullscreenPhotos?.let { photos ->
@@ -1005,11 +1052,13 @@ private fun JourneyRouteMap(
     journey: JourneyWithFlights,
     airports: Map<String, Airport>,
     gpsTrack: List<LocationRecord>,
-    showGpsTrack: Boolean,
+    pathReports: Map<Long, FlightPathAnalyzer.FlightPathReport>,
+    mapDisplayMode: JourneyMapDisplayMode,
     currentLatitude: Double?,
     currentLongitude: Double?,
-    onToggleGpsTrack: (Boolean) -> Unit,
-    onRefreshGps: () -> Unit
+    onMapDisplayMode: (JourneyMapDisplayMode) -> Unit,
+    onRefreshGps: () -> Unit,
+    onOpenFlightPath: (FlightEntity) -> Unit
 ) {
     val transportFlights = journey.orderedFlights.filterNot {
         TransportMode.isHotel(it.transportMode)
@@ -1023,13 +1072,21 @@ private fun JourneyRouteMap(
             ]?.let { LatLng(it.latitude, it.longitude) }
         )
     }.distinct()
-    val gpsPoints = gpsTrack.map { LatLng(it.latitude, it.longitude) }
+    val showRoute = mapDisplayMode == JourneyMapDisplayMode.ROUTE ||
+        mapDisplayMode == JourneyMapDisplayMode.BOTH
+    val showActual = mapDisplayMode == JourneyMapDisplayMode.ACTUAL ||
+        mapDisplayMode == JourneyMapDisplayMode.BOTH
+    val actualPoints = pathReports.values.flatMap { it.points }
+        .map { LatLng(it.latitude, it.longitude) }
     val currentGps = if (currentLatitude != null && currentLongitude != null) {
         LatLng(currentLatitude, currentLongitude)
     } else {
         null
     }
-    val focus = currentGps ?: gpsPoints.lastOrNull() ?: airportPoints.firstOrNull()
+    val focus = currentGps
+        ?: actualPoints.lastOrNull()
+        ?: gpsTrack.lastOrNull()?.let { LatLng(it.latitude, it.longitude) }
+        ?: airportPoints.firstOrNull()
     if (focus == null) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -1044,7 +1101,7 @@ private fun JourneyRouteMap(
             focus,
             when {
                 currentGps != null -> 12f
-                gpsPoints.isNotEmpty() -> 5f
+                actualPoints.isNotEmpty() -> 4f
                 else -> 2.5f
             }
         )
@@ -1056,32 +1113,30 @@ private fun JourneyRouteMap(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Journey route", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            "Green = arrived legs · Blue = remaining · Teal = GPS path · Pin = you now.",
+            "Route = planned · Actual = GPS paths (leg colors) · altitude tint on Flight path.",
             style = MaterialTheme.typography.bodySmall
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (gpsPoints.isNotEmpty()) {
-                FilterChip(
-                    selected = showGpsTrack,
-                    onClick = { onToggleGpsTrack(!showGpsTrack) },
-                    label = {
-                        Text(
-                            if (showGpsTrack) "GPS path on (${gpsPoints.size} pts)"
-                            else "GPS path off"
-                        )
-                    }
-                )
-            }
+            FilterChip(
+                selected = mapDisplayMode == JourneyMapDisplayMode.ROUTE,
+                onClick = { onMapDisplayMode(JourneyMapDisplayMode.ROUTE) },
+                label = { Text("Route") }
+            )
+            FilterChip(
+                selected = mapDisplayMode == JourneyMapDisplayMode.ACTUAL,
+                onClick = { onMapDisplayMode(JourneyMapDisplayMode.ACTUAL) },
+                label = { Text("Actual path") }
+            )
+            FilterChip(
+                selected = mapDisplayMode == JourneyMapDisplayMode.BOTH,
+                onClick = { onMapDisplayMode(JourneyMapDisplayMode.BOTH) },
+                label = { Text("Both") }
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onRefreshGps) {
                 Text(if (currentGps != null) "Center on me" else "Find my GPS")
             }
-        }
-        if (currentGps == null) {
-            Text(
-                "Waiting for current GPS… grant location permission if needed.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
         GoogleMap(
             modifier = Modifier.fillMaxWidth().height(280.dp),
@@ -1107,31 +1162,74 @@ private fun JourneyRouteMap(
                     snippet = "Current GPS"
                 )
             }
-            transportFlights.forEach { flight ->
-                val departure = airports[flight.departureAirportCode]
-                val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
-                    ?: flight.arrivalAirportCode
-                val arrival = airports[arrCode]
-                if (departure != null && arrival != null) {
-                    val arrived = TravelLegStatus.normalize(flight.travelLegStatus) ==
-                        TravelLegStatus.ARRIVED
-                    Polyline(
-                        points = listOf(
-                            LatLng(departure.latitude, departure.longitude),
-                            LatLng(arrival.latitude, arrival.longitude)
-                        ),
-                        color = if (arrived) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
-                        width = if (arrived) 8f else 7f,
-                        geodesic = true
-                    )
+            if (showRoute) {
+                transportFlights.forEach { flight ->
+                    val departure = airports[flight.departureAirportCode]
+                    val arrCode = flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                        ?: flight.arrivalAirportCode
+                    val arrival = airports[arrCode]
+                    if (departure != null && arrival != null) {
+                        val arrived = TravelLegStatus.normalize(flight.travelLegStatus) ==
+                            TravelLegStatus.ARRIVED
+                        Polyline(
+                            points = listOf(
+                                LatLng(departure.latitude, departure.longitude),
+                                LatLng(arrival.latitude, arrival.longitude)
+                            ),
+                            color = if (arrived) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
+                            width = if (arrived) 8f else 7f,
+                            geodesic = true
+                        )
+                    }
                 }
             }
-            if (showGpsTrack && gpsPoints.size >= 2) {
-                Polyline(
-                    points = gpsPoints,
-                    color = Color(0xFF00897B),
-                    width = 6f
-                )
+            if (showActual) {
+                transportFlights.forEachIndexed { index, flight ->
+                    val report = pathReports[flight.id] ?: return@forEachIndexed
+                    val legColor = Color(FlightPathAnalyzer.legColorArgb(index))
+                    report.segments.forEach { segment ->
+                        if (segment.points.size < 2) return@forEach
+                        Polyline(
+                            points = segment.points.map { LatLng(it.latitude, it.longitude) },
+                            color = if (segment.isGap) Color(0xFF90A4AE) else legColor,
+                            width = if (segment.isGap) 5f else 7f,
+                            pattern = if (segment.isGap) {
+                                listOf(Dash(22f), Gap(14f))
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                    report.takeoff?.let {
+                        Marker(
+                            state = MarkerState(LatLng(it.latitude, it.longitude)),
+                            title = "Takeoff · ${report.departureCode}"
+                        )
+                    }
+                    report.landing?.let {
+                        Marker(
+                            state = MarkerState(LatLng(it.latitude, it.longitude)),
+                            title = "Landing · ${report.arrivalCode}"
+                        )
+                    }
+                }
+            }
+        }
+        val withPath = transportFlights.filter { pathReports[it.id]?.hasPath == true }
+        if (withPath.isNotEmpty()) {
+            Text(
+                "Open a leg’s Flight path for altitude-colored detail.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            withPath.forEach { flight ->
+                TextButton(onClick = { onOpenFlightPath(flight) }) {
+                    Text(
+                        "Flight path · ${flight.departureAirportCode} → " +
+                            (flight.actualArrivalAirportCode?.takeIf { it.isNotBlank() }
+                                ?: flight.arrivalAirportCode)
+                    )
+                }
             }
         }
     }
@@ -1141,8 +1239,10 @@ private fun JourneyRouteMap(
 private fun SimpleJourneyItinerary(
     journey: JourneyWithFlights,
     airports: Map<String, Airport>,
+    pathReports: Map<Long, FlightPathAnalyzer.FlightPathReport> = emptyMap(),
     onEditLeg: (FlightEntity) -> Unit,
-    onRemoveLeg: (FlightEntity) -> Unit
+    onRemoveLeg: (FlightEntity) -> Unit,
+    onOpenFlightPath: (FlightEntity) -> Unit = {}
 ) {
     val legs = journey.orderedFlights.filterNot { TransportMode.isHotel(it.transportMode) }
     if (legs.isEmpty()) return
@@ -1260,6 +1360,38 @@ private fun SimpleJourneyItinerary(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2E7D32)
                             )
+                        }
+                        val pathReport = pathReports[flight.id]
+                        if (arrived || pathReport?.hasPath == true) {
+                            pathReport?.let { report ->
+                                val actual = report.actualDurationMinutes?.let { formatDuration(it) }
+                                Text(
+                                    buildString {
+                                        append("Scheduled ${formatDuration(report.scheduledDurationMinutes)}")
+                                        if (actual != null) append(" · Actual $actual")
+                                        report.maxAltitudeM?.toInt()?.let {
+                                            append(" · max ${it} m")
+                                        }
+                                        report.maxSpeedKmh?.toInt()?.let {
+                                            append(" · ${it} km/h")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF1B5E20)
+                                )
+                            }
+                            TextButton(
+                                onClick = { onOpenFlightPath(flight) },
+                                enabled = pathReport?.hasPath == true
+                            ) {
+                                Text(
+                                    if (pathReport?.hasPath == true) {
+                                        "Flight path"
+                                    } else {
+                                        "Flight path (no GPS yet)"
+                                    }
+                                )
+                            }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { onEditLeg(flight) }) { Text("Edit") }
